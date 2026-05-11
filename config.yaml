@@ -35,8 +35,8 @@ models:
       --tensor-split 1,1
       -np 1
       --no-mmap
-      -b 512
-      -ub 512
+      -b 1024
+      -ub 1024
       --temp 0.6
       --top-p 0.95
       --top-k 20
