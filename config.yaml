@@ -26,7 +26,7 @@ models:
   qwen3.6-27B-Q6:
     cmd: |
       llama-server -m /models/Qwen3.6-27B-Q6_K.gguf
-      -c 162000
+      -c 98304
       -ngl 999
       --flash-attn on
       -ctk q4_0
@@ -35,9 +35,8 @@ models:
       --tensor-split 1,1
       -np 1
       --no-mmap
-      --mlock
-      -b 2048
-      -ub 2048
+      -b 512
+      -ub 512
       --temp 0.6
       --top-p 0.95
       --top-k 20
