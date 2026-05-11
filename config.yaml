@@ -1,0 +1,123 @@
+models:
+  qwen3.6-35B-Q4:
+    cmd: |
+      llama-server -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+      --fit on
+      --fit-ctx 128000
+      --fit-target 256
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 2048
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --host 0.0.0.0
+      --port ${PORT}
+  qwen3.6-27B-Q6:
+    cmd: |
+      llama-server -m /models/Qwen3.6-27B-Q6_K.gguf
+      -c 162000
+      -ngl 999
+      --flash-attn on
+      -ctk q4_0
+      -ctv q4_0
+      --main-gpu 0
+      --tensor-split 1,1
+      -np 1
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 2048
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.05
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --host 0.0.0.0
+      --port ${PORT}
+  gemma-4-31B-Q6:
+    cmd: |
+      llama-server -m /models/gemma-4-31B-it-Q6_K.gguf
+      --fit on
+      --fit-ctx 128000
+      --fit-target 256
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 2048
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --host 0.0.0.0
+      --port ${PORT}
+  qwen3.5-4B:
+    cmd: |
+      llama-server -m /models/Qwen3.5-4B-BF16.gguf
+      --temp 0.7
+      --top-p 0.8
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 1.5
+      --repeat-penalty 1.0
+      --fit on
+      --fit-ctx 32000
+      --host 0.0.0.0
+      --port ${PORT}
+  qwen3.5-9B:
+    cmd: |
+      llama-server -m /models/Qwen3.5-9B-Q8_0.gguf
+      --temp 0.7
+      --top-p 0.8
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 1.5
+      --repeat-penalty 1.0
+      --fit on
+      --fit-ctx 32000
+      --host 0.0.0.0
+      --port ${PORT}
+  qwen3-14B:
+    cmd: |
+      llama-server -m /models/Qwen3-14B-Q6_K.gguf
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 1.5
+      --host 0.0.0.0
+      --port ${PORT}
+  bge-m3:
+    unlisted: true
+    cmd: |
+      llama-server -m /models/bge-m3-FP16.gguf
+      --host 0.0.0.0
+      --port ${PORT}
+      --ctx-size 8192
+      --batch-size 8192
+      --rope-scaling yarn
+      --rope-freq-scale 0.75
+      -ngl 99
+      --embeddings
+      --no-mmap
