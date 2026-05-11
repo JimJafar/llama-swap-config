@@ -25,9 +25,7 @@ models:
       --port ${PORT}
   qwen3.6-27B-Q6:
     cmd: |
-      sh -c 'nvidia-smi -i 1 -pm 1 >/dev/null 2>&1 || true; nvidia-smi -i 1 -pl 150 >/dev/null 2>&1 || true; exec "$@"' sh
-      llama-server
-      -m /models/Qwen3.6-27B-Q6_K.gguf
+      llama-server -m /models/Qwen3.6-27B-Q6_K.gguf
       -c 98304
       -ngl 999
       --flash-attn on
