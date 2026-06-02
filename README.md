@@ -36,21 +36,24 @@ Graphical glitches were also visible during inference workloads.
 
 ### Fix
 
-Two kernel parameters added to the limine bootloader config:
+The single effective kernel parameter, added to the limine bootloader config:
 
 ```
-pcie_aspm=off nvidia.NVreg_EnableGpuFirmware=0
+pcie_aspm=off
 ```
 
-- `pcie_aspm=off` — disables PCIe Active State Power Management. ASPM-driven L0s/L1 link transitions were the source of the Data Link Layer timeouts on the chipset-attached slot.
-- `nvidia.NVreg_EnableGpuFirmware=0` — disables the GSP (GPU System Processor) firmware path in the NVIDIA driver, falling back to the legacy kernel-driven init. Cleared the residual graphical glitches.
+- `pcie_aspm=off` — disables PCIe Active State Power Management. ASPM-driven L0s/L1 link transitions were the source of the Data Link Layer timeouts on the chipset-attached slot. This eliminated the link drops, the Xid 79 failures, **and** the inference-time visual artifacts (the artifacts were a downstream symptom of the same link instability).
 
-Together these eliminated the link drops, the Xid 79 failures, and the inference-time visual artifacts. No power-limit, BIOS PCIe-gen downgrade, or container privilege change is needed.
+No power-limit, BIOS PCIe-gen downgrade, or container privilege change is needed.
+
+> **Note — `pcie_aspm=off` is system-wide.** It disables ASPM for *every* PCIe link in the machine (NVMe, NICs, etc.), not just the 5060 Ti. The cost is slightly higher idle power and heat on those devices; there is no performance penalty (latency is marginally better). If reclaiming ASPM elsewhere matters, scope it to `0000:83:00.0` via sysfs/`setpci` instead, or use `pcie_aspm.policy=performance`.
+
+> **Discarded — `nvidia.NVreg_EnableGpuFirmware=0`.** This was originally also set, on the theory that disabling the GSP (GPU System Processor) firmware path cleared the graphical glitches. It does **not** do that here and has been removed. On Blackwell the NVIDIA **Open Kernel Module** is mandatory, and that module *requires* GSP — so the flag is silently ignored: `nvidia-smi -q` still reports an active `GSP Firmware Version` on both GPUs, and the parameter never even reached the live `/proc/cmdline`. The glitches were fixed by `pcie_aspm=off` alone.
 
 ### Things that did *not* help
 
 - **Forcing PCIe Gen 3** on the 5060 Ti slot in BIOS — made stability *worse*, not better. Left at Gen 4 (the slot's max).
-- **Power-limiting the 5060 Ti to 150 W** — reduced but did not eliminate the link errors; the underlying ASPM/firmware issue was unaffected.
+- **Power-limiting the 5060 Ti to 150 W** — reduced but did not eliminate the link errors; the underlying ASPM issue was unaffected.
 
 ## ⚠️ Gotcha: `-ub` must not exceed `-b`
 
