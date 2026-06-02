@@ -51,3 +51,26 @@ Together these eliminated the link drops, the Xid 79 failures, and the inference
 
 - **Forcing PCIe Gen 3** on the 5060 Ti slot in BIOS — made stability *worse*, not better. Left at Gen 4 (the slot's max).
 - **Power-limiting the 5060 Ti to 150 W** — reduced but did not eliminate the link errors; the underlying ASPM/firmware issue was unaffected.
+
+## ⚠️ Gotcha: `-ub` must not exceed `-b`
+
+`-ub` (`--ubatch-size`, the *physical* micro-batch) must be **≤** `-b` (`--batch-size`, the *logical* batch). I originally had:
+
+```
+-b 2048
+-ub 4096    # WRONG: micro-batch larger than batch
+```
+
+This is inconsistent — a micro-batch cannot be bigger than the batch it's drawn from. Worse, **the prefill compute buffer scales with `-ub`**, and that buffer is *not* split evenly across GPUs. On the 2x16 GB split this inflated the load on the 5060 Ti until large prompts hit:
+
+```
+CUDA error: out of memory
+```
+
+The OOM only showed up on **large prompts**, because that's when the oversized prefill buffer is actually allocated — small prompts fit fine and hid the bug.
+
+### Rule of thumb
+
+- Keep `-ub` ≤ `-b` (e.g. `-b 2048 -ub 512`). A smaller `-ub` shrinks the prefill compute buffer at a small prefill-speed cost — the main lever when you OOM only on long prompts.
+- `--tensor-split 1,1` balances **weights** only. KV cache and the prefill compute buffer land unevenly, so the nominally-equal split can still saturate one card first. Nudge the split toward the underloaded GPU (e.g. `--tensor-split 1.1,1`) and watch `nvidia-smi` until both cards sit at similar used-MiB.
+- The display/desktop also consumes ~750 MiB on GPU 0, further skewing the "equal" split.

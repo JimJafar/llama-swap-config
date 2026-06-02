@@ -21,6 +21,7 @@ models:
       --repeat-penalty 1.0
       --reasoning-budget -1
       --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
       --host 0.0.0.0
       --port ${PORT}
   qwen3.6-27B-Q6:
@@ -45,6 +46,59 @@ models:
       --repeat-penalty 1.0
       --reasoning-budget -1
       --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --host 0.0.0.0
+      --port ${PORT}
+  Qwen3.6-27B-NVFP4:
+    cmd: |
+      llama-server -m /models/AEON-Qwen3.6-27B-Ultimate-Uncensored-Multimodal-NVFP4-MTP-XS.gguf
+      -ngl 99
+      --flash-attn on
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -b 2048
+      -c 40000
+      -ctk q8_0
+      -ctv q8_0
+      --main-gpu 0
+      --tensor-split 1.1,1
+      -np 1
+      -ub 512
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.05
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --host 0.0.0.0
+      --port ${PORT}
+  Qwen3.6-27B-Q5-MTP:
+    cmd: |
+      llama-server -m /models/Qwen3.6-27B-UD-Q5_K_XL.gguf
+      -ngl 99
+      --flash-attn on
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -b 2048
+      -c 40000
+      -ctk q8_0
+      -ctv q8_0
+      --main-gpu 0
+      --tensor-split 1.1,1
+      -np 1
+      -ub 512
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.05
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
       --host 0.0.0.0
       --port ${PORT}
   gemma-4-31B-Q6:
@@ -69,6 +123,36 @@ models:
       --repeat-penalty 1.0
       --reasoning-budget -1
       --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port ${PORT}
+  gemma-4-31B-Q5:
+    cmd: |
+      llama-server -m /models/google_gemma-4-31B-it-Q5_K_L.gguf
+      --fit on
+      --fit-ctx 128000
+      --fit-target 256
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 2048
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
       --host 0.0.0.0
       --port ${PORT}
   qwen3.5-4B:
