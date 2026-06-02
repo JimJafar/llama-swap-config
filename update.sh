@@ -1,0 +1,1 @@
+docker pull ghcr.io/mostlygeek/llama-swap:cuda
