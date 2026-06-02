@@ -51,13 +51,12 @@ models:
       --port ${PORT}
   Qwen3.6-27B-NVFP4:
     cmd: |
-      llama-server -m /models/AEON-Qwen3.6-27B-Ultimate-Uncensored-Multimodal-NVFP4-MTP-XS.gguf
+      llama-server -m /models/AEON-Qwen3.6-27B-Ultimate-Uncensored-Multimodal-NVFP4-XS.gguf
       -ngl 99
       --flash-attn on
-      --spec-type draft-mtp
       --spec-draft-n-max 2
       -b 2048
-      -c 40000
+      -c 52000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
@@ -83,7 +82,7 @@ models:
       --spec-type draft-mtp
       --spec-draft-n-max 2
       -b 2048
-      -c 40000
+      -c 48000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
