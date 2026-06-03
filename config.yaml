@@ -33,7 +33,7 @@ models:
       -ctk q4_0
       -ctv q4_0
       --main-gpu 0
-      --tensor-split 1,1
+      --tensor-split 1.1,1
       -np 1
       --no-mmap
       -b 1024
@@ -80,9 +80,9 @@ models:
       -ngl 99
       --flash-attn on
       --spec-type draft-mtp
-      --spec-draft-n-max 2
+      --spec-draft-n-max 3
       -b 2048
-      -c 48000
+      -c 80000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0

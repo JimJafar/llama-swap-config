@@ -103,6 +103,25 @@ The OOM only showed up on **large prompts**, because that's when the oversized p
 - `--tensor-split 1,1` balances **weights** only. KV cache and the prefill compute buffer land unevenly, so the nominally-equal split can still saturate one card first. Nudge the split toward the underloaded GPU (e.g. `--tensor-split 1.1,1`) and watch `nvidia-smi` until both cards sit at similar used-MiB.
 - The display/desktop also consumes ~750 MiB on GPU 0, further skewing the "equal" split.
 
+### Do not use tensor parallelism (`-sm tensor`)
+
+Tensor parallelism is **not usable on this machine** — use the default layer split (`-sm layer`). The two GPUs sit on **separate PCIe host bridges** (the 5070 Ti on CPU-direct lanes, the 5060 Ti on the PCH), so there is **no peer-to-peer path** between them:
+
+```
+$ nvidia-smi topo -m
+       GPU0   GPU1
+GPU0    X     NODE      # NODE = traverses PCIe host bridges (via the CPU/DMI) — no P2P
+GPU1   NODE    X
+```
+
+`-sm tensor` runs on NCCL, which requires GPU↔GPU P2P. Without it, NCCL cannot establish its transport and `llama-server` aborts during warm-up:
+
+```
+CUDA error: unhandled cuda error (run with NCCL_DEBUG=INFO for details)
+```
+
+(Docker also caps the container's `/dev/shm` at 64 MB by default, which independently breaks NCCL's shared-memory fallback.) This is a hardware-topology limit, not a config bug — tensor parallelism needs matched GPUs with a P2P path (e.g. both on CPU-direct lanes, or NVLink). Stick to layer split here.
+
 ## Updating
 
 The `ghcr.io/mostlygeek/llama-swap:cuda` image bundles **both** llama-swap and a pinned snapshot of llama.cpp's `llama-server`, so the llama.cpp version advances only when the image is re-pulled.
