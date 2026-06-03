@@ -15,6 +15,8 @@ The 5060 Ti is **chipset-attached** rather than on CPU-direct lanes; it shares D
 
 ## Resolved: second GPU falling off the bus under inference load
 
+**Root cause (confirmed June 2026): the 5060 Ti was improperly seated.** Reseating it resolved the failure. Everything below was diagnosed *before* that was found; the `pcie_aspm=off` kernel parameter cut the failure rate by reducing PCIe link-power transitions, but it was masking a mechanical fault, not curing one.
+
 ### Symptom
 
 While `qwen3.6-27B-Q6` was loaded (splits weights across both GPUs via `--tensor-split 1,1`), the 5060 Ti would disappear from `nvtop` mid-inference. Kernel log:
@@ -34,26 +36,49 @@ device [10de:2d04] error status/mask=00001000/0000e000
 
 Graphical glitches were also visible during inference workloads.
 
-### Fix
+### Diagnostic signature
 
-The single effective kernel parameter, added to the limine bootloader config:
+When the card drops, `nvidia-smi` can no longer get a device handle and the PCIe link has **de-trained from x8 to x1**:
+
+```
+$ nvidia-smi
+Unable to determine the device handle for GPU 0000:83:00.0: Unknown Error
+
+$ cat /sys/bus/pci/devices/0000:83:00.0/current_link_width   # 1   (max_link_width = 8)
+$ cat /sys/bus/pci/devices/0000:83:00.0/current_link_speed   # 16.0 GT/s — normal Gen4; the *width* is the tell
+```
+
+The link-**width** collapse (x8 → x1) under load — with healthy power draw (~150 W of 180 W) and cool temps — points at marginal physical contact rather than power or ASPM. That is what the reseat confirmed. The link speed staying at a correct Gen4 16 GT/s rules out a generation-negotiation problem.
+
+**Recovery without a reboot** (sometimes re-trains the link; often a wedged card needs a reboot — and a `rescan` can hang if the device is truly unresponsive):
+
+```
+echo 1 | sudo tee /sys/bus/pci/devices/0000:83:00.0/remove
+echo 1 | sudo tee /sys/bus/pci/rescan
+```
+
+### The actual fix
+
+**Reseat the 5060 Ti.** A marginal seat holds at idle but de-trains under the combined link + power activity of inference, producing the Xid 79 / Data Link Layer timeouts above.
+
+### Mitigation that masked it (kept — harmless): `pcie_aspm=off`
+
+Added to the limine bootloader config:
 
 ```
 pcie_aspm=off
 ```
 
-- `pcie_aspm=off` — disables PCIe Active State Power Management. ASPM-driven L0s/L1 link transitions were the source of the Data Link Layer timeouts on the chipset-attached slot. This eliminated the link drops, the Xid 79 failures, **and** the inference-time visual artifacts (the artifacts were a downstream symptom of the same link instability).
-
-No power-limit, BIOS PCIe-gen downgrade, or container privilege change is needed.
+- `pcie_aspm=off` — disables PCIe Active State Power Management, removing ASPM-driven L0s/L1 link transitions. This *reduced* the link drops by keeping the marginal link from cycling power states, which is why it originally looked like the cure — but it did not address the underlying mechanical fault. It is harmless and is left in place. No power-limit, BIOS PCIe-gen downgrade, or container privilege change is needed.
 
 > **Note — `pcie_aspm=off` is system-wide.** It disables ASPM for *every* PCIe link in the machine (NVMe, NICs, etc.), not just the 5060 Ti. The cost is slightly higher idle power and heat on those devices; there is no performance penalty (latency is marginally better). If reclaiming ASPM elsewhere matters, scope it to `0000:83:00.0` via sysfs/`setpci` instead, or use `pcie_aspm.policy=performance`.
 
-> **Discarded — `nvidia.NVreg_EnableGpuFirmware=0`.** This was originally also set, on the theory that disabling the GSP (GPU System Processor) firmware path cleared the graphical glitches. It does **not** do that here and has been removed. On Blackwell the NVIDIA **Open Kernel Module** is mandatory, and that module *requires* GSP — so the flag is silently ignored: `nvidia-smi -q` still reports an active `GSP Firmware Version` on both GPUs, and the parameter never even reached the live `/proc/cmdline`. The glitches were fixed by `pcie_aspm=off` alone.
+> **Discarded — `nvidia.NVreg_EnableGpuFirmware=0`.** This was originally also set, on the theory that disabling the GSP (GPU System Processor) firmware path cleared the graphical glitches. It does **not** do that here and has been removed. On Blackwell the NVIDIA **Open Kernel Module** is mandatory, and that module *requires* GSP — so the flag is silently ignored: `nvidia-smi -q` still reports an active `GSP Firmware Version` on both GPUs, and the parameter never even reached the live `/proc/cmdline`. The glitches were a downstream symptom of the link instability and cleared once the link was stable (ultimately, once the card was properly seated).
 
 ### Things that did *not* help
 
-- **Forcing PCIe Gen 3** on the 5060 Ti slot in BIOS — made stability *worse*, not better. Left at Gen 4 (the slot's max).
-- **Power-limiting the 5060 Ti to 150 W** — reduced but did not eliminate the link errors; the underlying ASPM issue was unaffected.
+- **Forcing PCIe Gen 3** on the 5060 Ti slot in BIOS — made stability *worse*, not better. Left at Gen 4 (the slot's max). In hindsight, consistent with run-to-run noise over a marginal seat.
+- **Power-limiting the 5060 Ti to 150 W** — reduced but did not eliminate the link errors. Consistent with the fault being mechanical (the seat), not power.
 
 ## ⚠️ Gotcha: `-ub` must not exceed `-b`
 
