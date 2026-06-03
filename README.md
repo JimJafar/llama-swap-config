@@ -102,3 +102,19 @@ The OOM only showed up on **large prompts**, because that's when the oversized p
 - Keep `-ub` ≤ `-b` (e.g. `-b 2048 -ub 512`). A smaller `-ub` shrinks the prefill compute buffer at a small prefill-speed cost — the main lever when you OOM only on long prompts.
 - `--tensor-split 1,1` balances **weights** only. KV cache and the prefill compute buffer land unevenly, so the nominally-equal split can still saturate one card first. Nudge the split toward the underloaded GPU (e.g. `--tensor-split 1.1,1`) and watch `nvidia-smi` until both cards sit at similar used-MiB.
 - The display/desktop also consumes ~750 MiB on GPU 0, further skewing the "equal" split.
+
+## Updating
+
+The `ghcr.io/mostlygeek/llama-swap:cuda` image bundles **both** llama-swap and a pinned snapshot of llama.cpp's `llama-server`, so the llama.cpp version advances only when the image is re-pulled.
+
+```
+./update.sh    # docker pull ghcr.io/mostlygeek/llama-swap:cuda
+./version.sh    # print the bundled llama.cpp + llama-swap versions
+```
+
+`version.sh` reads the versions straight from the running container (the llama-swap web UI shows neither). It locates the container by image, so it survives the container-name change you get after each re-pull. Example output:
+
+```
+llama.cpp:  version: 9468 (354ebac8c)
+llama-swap: version: 222 (...)
+```
