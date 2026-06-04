@@ -11,6 +11,8 @@ Group=jim
 SupplementaryGroups=docker
 WorkingDirectory=/home/jim/llama-swap
 Environment=HOME=/home/jim
+# Ensure docker (/usr/bin/docker) is on PATH for the model `docker run` commands.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin
 # Host binary from the llama-swap-bin AUR package. -watch-config live-reloads
 # config.yaml on change (no restart needed to edit models).
 ExecStart=/usr/bin/llama-swap -config /home/jim/llama-swap/config.yaml -watch-config -listen 0.0.0.0:8033
