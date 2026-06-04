@@ -180,3 +180,23 @@ docker run --rm --runtime nvidia --ipc=host \
 ```
 
 Once it serves on `:8000`, wiring it into llama-swap is just a `cmd:`/`cmdStop:` model entry wrapping the above (publish `${PORT}:8000`).
+
+## Upgrade options & expected gains
+
+Analysis of what would actually move the needle, given the current bottleneck is the **5060 Ti** (448 GB/s, ~half the 5070 Ti's bandwidth) and the **single CPU-wired slot** (no GPU P2P).
+
+Baseline today: **`Qwen3.6-27B-Q5-MTP`, llama.cpp layer-split, ~36–47 tok/s, 156k context.**
+
+### Z890 board with two CPU-wired x8/x8 slots
+- **Unlocks:** both GPUs on CPU lanes → P2P → vLLM tensor-parallel works → **NVFP4 + MTP across both cards** becomes possible. Also removes the 5060 Ti from the chipset/DMI link (ends the "fallen off the bus" fragility).
+- **Realistic decode:** **~50–70 tok/s (≈1.3–1.7×)**, *not* 2×. Gains come mostly from NVFP4 (~20–30% less bandwidth/token) and native FP4 **prefill** (the long-prompt win); TP parallelism adds less than hoped.
+- **Why it's capped:**
+  - **No NVLink** — P2P would be over **PCIe Gen4 x8 (~16 GB/s, capped by the Gen4 5060 Ti)**. TP all-reduces every layer; that interconnect latency eats much of the parallelism. Consumer no-NVLink TP often nets only ~1.2–1.5× over layer-split for single-stream.
+  - **Mismatched cards** — TP syncs every step, so the 5070 Ti waits on the 5060 Ti. No board fixes this. (This is why matched 2×3090 setups hit ~70 tok/s and this pair won't.)
+
+### Ranked by speed-per-spend
+1. **Single ≥24 GB GPU** (e.g. used 3090/4090-class or a 24 GB Blackwell) — biggest gain: runs the model on one fast card, no inter-GPU penalty at all, and unlocks single-GPU NVFP4+MTP. Removes both bottlenecks.
+2. **Replace the 5060 Ti with a matched 5070 Ti** — fixes the bandwidth ceiling *and* TP balance; would need the Z890 board too for P2P.
+3. **Z890 x8/x8 board (5060 Ti kept)** — cheapest, unlocks the most *capability* (vLLM NVFP4+MTP) but delivers the least *speed* (~1.3–1.7×). Good if the goal is the NVFP4 capability + ending bus-fragility, not raw tok/s.
+
+Bottom line: the board is the cheapest unlock but the 5060 Ti remains the ceiling. For raw speed, upgrade the *GPU* before the board.
