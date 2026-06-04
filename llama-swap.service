@@ -1,0 +1,21 @@
+[Unit]
+Description=llama-swap (host binary; manages llama.cpp + vLLM via docker)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+# Run as jim (member of the docker group) so model cmds can launch containers.
+User=jim
+Group=jim
+SupplementaryGroups=docker
+WorkingDirectory=/home/jim/llama-swap
+Environment=HOME=/home/jim
+# Host binary from the llama-swap-bin AUR package. -watch-config live-reloads
+# config.yaml on change (no restart needed to edit models).
+ExecStart=/usr/bin/llama-swap -config /home/jim/llama-swap/config.yaml -watch-config -listen 0.0.0.0:8033
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

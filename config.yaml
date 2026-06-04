@@ -1,7 +1,20 @@
+# llama-swap runs as a host binary (llama-swap-bin AUR) and launches each model
+# as a docker container. llama.cpp models use the bundled mostlygeek image with
+# the entrypoint overridden to /app/llama-server; the vLLM model uses the vllm
+# image. ${PORT} is assigned by llama-swap and published from the container; the
+# server inside always listens on its own fixed port. cmdStop stops the named
+# container cleanly on swap so VRAM is freed.
+#
+# Shared docker flags for llama.cpp models:
+#   --runtime nvidia --cap-add SYS_ADMIN  (matches the previously-working setup)
+#   --entrypoint /app/llama-server        (image entrypoint is llama-swap)
 models:
   qwen3.6-35B-Q4:
     cmd: |
-      llama-server -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+      docker run --rm --name q35b --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
       --fit on
       --fit-ctx 128000
       --fit-target 256
@@ -23,10 +36,14 @@ models:
       --chat-template-kwargs "{\"preserve_thinking\": true}"
       --timeout 900
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop q35b
   qwen3.6-27B-Q6:
     cmd: |
-      llama-server -m /models/Qwen3.6-27B-Q6_K.gguf
+      docker run --rm --name q27q6 --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.6-27B-Q6_K.gguf
       -c 98304
       -ngl 999
       --flash-attn on
@@ -48,10 +65,14 @@ models:
       --chat-template-kwargs "{\"preserve_thinking\": true}"
       --timeout 900
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop q27q6
   Qwen3.6-27B-NVFP4:
     cmd: |
-      llama-server -m /models/AEON-Qwen3.6-27B-Ultimate-Uncensored-Multimodal-NVFP4-XS.gguf
+      docker run --rm --name q27nvfp4 --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/AEON-Qwen3.6-27B-Ultimate-Uncensored-Multimodal-NVFP4-XS.gguf
       -ngl 99
       --flash-attn on
       --spec-draft-n-max 2
@@ -73,16 +94,20 @@ models:
       --chat-template-kwargs "{\"preserve_thinking\": true}"
       --timeout 900
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop q27nvfp4
   Qwen3.6-27B-Q5-MTP:
     cmd: |
-      llama-server -m /models/Qwen3.6-27B-UD-Q5_K_XL.gguf
+      docker run --rm --name q27mtp --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.6-27B-UD-Q5_K_XL.gguf
       -ngl 99
       --flash-attn on
       --spec-type draft-mtp
       --spec-draft-n-max 3
       -b 2048
-      -c 80000
+      -c 156000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
@@ -99,10 +124,18 @@ models:
       --chat-template-kwargs "{\"preserve_thinking\": true}"
       --timeout 900
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop q27mtp
+  # NVFP4 + MTP via vLLM is parked — it loads but dual-GPU TP deadlocks at the
+  # first all-reduce on this NODE (no-P2P) topology, and the ~15 GB model won't
+  # fit one 16 GB card. See README "Parked: NVFP4 + MTP via vLLM" for the full
+  # investigation and the best-known command to resume from.
   gemma-4-31B-Q6:
     cmd: |
-      llama-server -m /models/gemma-4-31B-it-Q6_K.gguf
+      docker run --rm --name g31q6 --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/gemma-4-31B-it-Q6_K.gguf
       --fit on
       --fit-ctx 128000
       --fit-target 256
@@ -126,10 +159,14 @@ models:
       --no-context-shift
       --ctx-checkpoints 128
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop g31q6
   gemma-4-31B-Q5:
     cmd: |
-      llama-server -m /models/google_gemma-4-31B-it-Q5_K_L.gguf
+      docker run --rm --name g31q5 --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/google_gemma-4-31B-it-Q5_K_L.gguf
       --fit on
       --fit-ctx 128000
       --fit-target 256
@@ -153,10 +190,14 @@ models:
       --no-context-shift
       --ctx-checkpoints 128
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop g31q5
   qwen3.5-4B:
     cmd: |
-      llama-server -m /models/Qwen3.5-4B-BF16.gguf
+      docker run --rm --name q4b --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.5-4B-BF16.gguf
       --temp 0.7
       --top-p 0.8
       --top-k 20
@@ -166,10 +207,14 @@ models:
       --fit on
       --fit-ctx 32000
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop q4b
   qwen3.5-9B:
     cmd: |
-      llama-server -m /models/Qwen3.5-9B-Q8_0.gguf
+      docker run --rm --name q9b --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.5-9B-Q8_0.gguf
       --temp 0.7
       --top-p 0.8
       --top-k 20
@@ -179,23 +224,31 @@ models:
       --fit on
       --fit-ctx 32000
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop q9b
   qwen3-14B:
     cmd: |
-      llama-server -m /models/Qwen3-14B-Q6_K.gguf
+      docker run --rm --name q14b --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3-14B-Q6_K.gguf
       --temp 0.6
       --top-p 0.95
       --top-k 20
       --min-p 0.0
       --presence-penalty 1.5
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
+    cmdStop: docker stop q14b
   bge-m3:
     unlisted: true
     cmd: |
-      llama-server -m /models/bge-m3-FP16.gguf
+      docker run --rm --name bge --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/bge-m3-FP16.gguf
       --host 0.0.0.0
-      --port ${PORT}
+      --port 8080
       --ctx-size 8192
       --batch-size 8192
       --rope-scaling yarn
@@ -203,3 +256,4 @@ models:
       -ngl 99
       --embeddings
       --no-mmap
+    cmdStop: docker stop bge

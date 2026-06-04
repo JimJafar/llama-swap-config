@@ -122,18 +122,62 @@ CUDA error: unhandled cuda error (run with NCCL_DEBUG=INFO for details)
 
 (Docker also caps the container's `/dev/shm` at 64 MB by default, which independently breaks NCCL's shared-memory fallback.) This is a hardware-topology limit, not a config bug — tensor parallelism needs matched GPUs with a P2P path (e.g. both on CPU-direct lanes, or NVLink). Stick to layer split here.
 
+## Deployment
+
+llama-swap runs as a **host binary** from the `llama-swap-bin` AUR package (`/usr/bin/llama-swap`), driven by a systemd unit. It launches **each model as its own docker container** and stops it on swap (`cmdStop`), so only one model holds VRAM at a time:
+
+- **llama.cpp models** use the `ghcr.io/mostlygeek/llama-swap:cuda` image with the entrypoint overridden to `/app/llama-server` (the image's entrypoint is `llama-swap` itself).
+- **vLLM models** (NVFP4 + MTP) are **parked** — not currently wired up. See "Parked: NVFP4 + MTP via vLLM" below for why and how to resume.
+
+The systemd unit is tracked at [`llama-swap.service`](llama-swap.service) and installed to `/etc/systemd/system/llama-swap.service` (it shadows the AUR vendor unit at `/usr/lib/systemd/system/`, which uses `DynamicUser=yes` and so can't access docker). It runs as `jim` (in the `docker` group), listens on `0.0.0.0:8033`, and uses `-watch-config` so `config.yaml` edits live-reload without a restart.
+
 ## Updating
 
-The `ghcr.io/mostlygeek/llama-swap:cuda` image bundles **both** llama-swap and a pinned snapshot of llama.cpp's `llama-server`, so the llama.cpp version advances only when the image is re-pulled.
+Three independently-versioned pieces:
 
 ```
-./update.sh    # docker pull ghcr.io/mostlygeek/llama-swap:cuda
-./version.sh    # print the bundled llama.cpp + llama-swap versions
+paru -S llama-swap-bin                 # 1. llama-swap host binary (AUR)
+./update.sh                            # 2. llama.cpp image (docker pull mostlygeek:cuda)
+./version.sh                           # report installed versions
+# (vLLM image only needed if/when the parked NVFP4 path is revived)
 ```
 
-`version.sh` reads the versions straight from the running container (the llama-swap web UI shows neither). It locates the container by image, so it survives the container-name change you get after each re-pull. Example output:
+`version.sh` reports the host llama-swap version and the llama.cpp build inside the image (the web UI shows neither). Example output:
 
 ```
 llama.cpp:  version: 9468 (354ebac8c)
-llama-swap: version: 222 (...)
+llama-swap: version: 223 (...)
 ```
+
+## Parked: NVFP4 + MTP via vLLM
+
+Goal: run `sakamakismile/Qwen3.6-27B-Text-NVFP4-MTP` (modelopt NVFP4 + multi-token-prediction) to get native Blackwell FP4 + MTP speculative decoding. **Currently not working on this machine.** Findings (June 2026, vLLM 0.22.0 `vllm/vllm-openai:latest`):
+
+- **Single-GPU: impossible** — the model needs **~15.2 GB for weights alone**, which OOMs a 16 GB card. Would need a ≥24 GB GPU.
+- **Dual-GPU pipeline-parallel: rejected** — MTP's draft model doesn't implement vLLM's `SupportsPP` (`NotImplementedError`).
+- **Dual-GPU tensor-parallel: deadlocks** — weights shard onto both cards (~10 GB each), then it **hangs at 0% util** on the first all-reduce of the profiling forward. Confirmed unaffected by *all* of: `--shm-size` vs `--ipc=host`, FlashAttention vs `TRITON_ATTN`, `NCCL_P2P_DISABLE=1`, `NCCL_SHM_DISABLE=1` (sockets), `VLLM_WORKER_MULTIPROC_METHOD=spawn`, `--enforce-eager`, and a cleaned `/dev/shm`. `NCCL_DEBUG=INFO` prints no transport lines, i.e. it hangs before/at the collective. Root cause is the no-P2P `NODE` topology (5070 Ti on CPU lanes, 5060 Ti on the PCH — see "Do not use tensor parallelism").
+
+Others report success with the *same* 5070 Ti + 5060 Ti pair, so it's likely a **build or driver** difference. To resume, the two highest-value avenues are:
+
+1. **A different vLLM build** — e.g. the NGC image `nvcr.io/nvidia/vllm` (validated for NVFP4 on the 5070 Ti), in case 0.22.0 has an `sm_120` TP-init bug.
+2. **Compare against a working setup** — their vLLM version, `nvidia-smi topo -m` (P2P vs `NODE`?), and driver version.
+
+Best-known command to resume from (hangs on the current build, but is the furthest-progressing config):
+
+```
+docker run --rm --runtime nvidia --ipc=host \
+  -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=0,1 \
+  -e VLLM_WORKER_MULTIPROC_METHOD=spawn -e VLLM_NO_USAGE_STATS=1 \
+  -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e NCCL_P2P_DISABLE=1 \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512 \
+  -p 8000:8000 -v /home/jim/models/vllm:/root/.cache/huggingface \
+  <vllm-image> \
+  --model sakamakismile/Qwen3.6-27B-Text-NVFP4-MTP --served-model-name qwen36-nvfp4-mtp \
+  --tensor-parallel-size 2 --max-model-len 204800 --max-num-batched-tokens 8192 --max-num-seqs 1 \
+  --gpu-memory-utilization 0.88 --kv-cache-dtype fp8 --quantization modelopt \
+  --speculative-config '{"method":"mtp","num_speculative_tokens":3}' \
+  --reasoning-parser qwen3 --language-model-only --generation-config vllm \
+  --disable-custom-all-reduce --attention-backend TRITON_ATTN --port 8000
+```
+
+Once it serves on `:8000`, wiring it into llama-swap is just a `cmd:`/`cmdStop:` model entry wrapping the above (publish `${PORT}:8000`).
