@@ -157,12 +157,11 @@ Goal: run `sakamakismile/Qwen3.6-27B-Text-NVFP4-MTP` (modelopt NVFP4 + multi-tok
 - **Dual-GPU pipeline-parallel: rejected** — MTP's draft model doesn't implement vLLM's `SupportsPP` (`NotImplementedError`).
 - **Dual-GPU tensor-parallel: deadlocks** — weights shard onto both cards (~10 GB each), then it **hangs at 0% util** on the first all-reduce of the profiling forward. Confirmed unaffected by *all* of: `--shm-size` vs `--ipc=host`, FlashAttention vs `TRITON_ATTN`, `NCCL_P2P_DISABLE=1`, `NCCL_SHM_DISABLE=1` (sockets), `VLLM_WORKER_MULTIPROC_METHOD=spawn`, `--enforce-eager`, and a cleaned `/dev/shm`. `NCCL_DEBUG=INFO` prints no transport lines, i.e. it hangs before/at the collective. Root cause is the no-P2P `NODE` topology (5070 Ti on CPU lanes, 5060 Ti on the PCH — see "Do not use tensor parallelism").
 
-Others report success with the *same* 5070 Ti + 5060 Ti pair, so it's likely a **build or driver** difference. To resume, the two highest-value avenues are:
+**Confirmed root cause: this motherboard has only one CPU-wired PCIe slot** (the 5070 Ti's). The 5060 Ti is therefore always chipset-attached (PCH), so the two cards can never have a peer-to-peer path — `nvidia-smi topo -m` shows `NODE` permanently. vLLM tensor-parallel needs P2P for its all-reduce; it can't get it here, and no env var / NCCL version / vLLM build can synthesize a P2P link that the board doesn't wire. (Ruled out along the way: NCCL was already 2.28.9 — newer than the ≥2.27.3 Blackwell floor — and we ran `--ipc=host`, so neither was the issue.) Others who run this exact GPU pair under vLLM TP have a board with **two CPU-wired slots**.
 
-1. **A different vLLM build** — e.g. the NGC image `nvcr.io/nvidia/vllm` (validated for NVFP4 on the 5070 Ti), in case 0.22.0 has an `sm_120` TP-init bug.
-2. **Compare against a working setup** — their vLLM version, `nvidia-smi topo -m` (P2P vs `NODE`?), and driver version.
+This becomes viable only with a hardware change: a board exposing two CPU-direct slots (x8/x8 bifurcation) for dual-GPU TP, **or** a single ≥24 GB GPU for single-GPU. Until then, the dual-GPU path on this machine is **llama.cpp layer-split** (`Qwen3.6-27B-Q5-MTP`), which works precisely because layer-split is sequential and needs no P2P.
 
-Best-known command to resume from (hangs on the current build, but is the furthest-progressing config):
+Best-known command to resume from *if the hardware ever changes* (furthest-progressing config; still hangs on the current board for the reason above):
 
 ```
 docker run --rm --runtime nvidia --ipc=host \
