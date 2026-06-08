@@ -104,14 +104,26 @@ models:
       -m /models/Qwen3.6-27B-UD-Q5_K_XL.gguf
       -ngl 99
       --flash-attn on
-      --spec-type draft-mtp
+      # --spec-type draft-mtp
+      # --spec-draft-n-max 3
+
+      --spec-type draft-mtp,ngram-mod
       --spec-draft-n-max 3
+      --spec-ngram-mod-n-match 40
+      --spec-ngram-mod-n-min 0
+      --spec-ngram-mod-n-max 16
+
+      # --spec-draft-p-min 0.75
+      # --cache-type-k-draft q5_0
+      # --cache-type-v-draft q5_0
+
+      # --kv-unified
       -b 2048
       -c 156000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
-      --tensor-split 1.1,1
+      --tensor-split 1,1
       -np 1
       -ub 512
       --temp 0.6
@@ -130,6 +142,37 @@ models:
   # first all-reduce on this NODE (no-P2P) topology, and the ~15 GB model won't
   # fit one 16 GB card. See README "Parked: NVFP4 + MTP via vLLM" for the full
   # investigation and the best-known command to resume from.
+  gemma-4-31B-Q4-QAT:
+    cmd: |
+      docker run --rm --name g31q6 --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+      --fit on
+      --fit-ctx 156000
+      --fit-target 256
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 2048
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 64
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g31q6
   gemma-4-31B-Q6:
     cmd: |
       docker run --rm --name g31q6 --runtime nvidia --cap-add SYS_ADMIN

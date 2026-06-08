@@ -120,7 +120,9 @@ GPU1   NODE    X
 CUDA error: unhandled cuda error (run with NCCL_DEBUG=INFO for details)
 ```
 
-(Docker also caps the container's `/dev/shm` at 64 MB by default, which independently breaks NCCL's shared-memory fallback.) This is a hardware-topology limit, not a config bug — tensor parallelism needs matched GPUs with a P2P path (e.g. both on CPU-direct lanes, or NVLink). Stick to layer split here.
+(Docker also caps the container's `/dev/shm` at 64 MB by default, which independently breaks NCCL's shared-memory fallback.)
+
+> **Correction (2026-06-08):** the premise "NCCL needs P2P, can't establish transport here" is **false** — NCCL works across these two GPUs **via its SHM transport** when given `--ipc=host` (so `/dev/shm` isn't capped at 64 MB) plus `NCCL_P2P_DISABLE=1`. Proven with a bare 2-rank all-reduce (see "Parked: NVFP4 + MTP via vLLM"). The original `-sm tensor` abort was almost certainly the **64 MB `/dev/shm` cap** the parenthetical already flagged, not a fundamental P2P requirement. Layer split is still the simpler default and avoids the every-layer all-reduce tax over the x4 chipset link — so **stick to layer split for performance**, but not because TP is impossible. (Whether `-sm tensor` is actually *faster* here, given the SHM-staged all-reduce over x4, is untested.)
 
 ## Deployment
 
@@ -151,15 +153,29 @@ llama-swap: version: 223 (...)
 
 ## Parked: NVFP4 + MTP via vLLM
 
-Goal: run `sakamakismile/Qwen3.6-27B-Text-NVFP4-MTP` (modelopt NVFP4 + multi-token-prediction) to get native Blackwell FP4 + MTP speculative decoding. **Currently not working on this machine.** Findings (June 2026, vLLM 0.22.0 `vllm/vllm-openai:latest`):
+Goal: run `sakamakismile/Qwen3.6-27B-Text-NVFP4-MTP` (modelopt NVFP4 + multi-token-prediction) to get native Blackwell FP4 + MTP speculative decoding. **The model does not initialize in vLLM 0.22.0 on this machine — but the reason is the *model*, not the hardware.**
 
-- **Single-GPU: impossible** — the model needs **~15.2 GB for weights alone**, which OOMs a 16 GB card. Would need a ≥24 GB GPU.
-- **Dual-GPU pipeline-parallel: rejected** — MTP's draft model doesn't implement vLLM's `SupportsPP` (`NotImplementedError`).
-- **Dual-GPU tensor-parallel: deadlocks** — weights shard onto both cards (~10 GB each), then it **hangs at 0% util** on the first all-reduce of the profiling forward. Confirmed unaffected by *all* of: `--shm-size` vs `--ipc=host`, FlashAttention vs `TRITON_ATTN`, `NCCL_P2P_DISABLE=1`, `NCCL_SHM_DISABLE=1` (sockets), `VLLM_WORKER_MULTIPROC_METHOD=spawn`, `--enforce-eager`, and a cleaned `/dev/shm`. `NCCL_DEBUG=INFO` prints no transport lines, i.e. it hangs before/at the collective. Root cause is the no-P2P `NODE` topology (5070 Ti on CPU lanes, 5060 Ti on the PCH — see "Do not use tensor parallelism").
+> ### ⚠️ Correction (2026-06-08) — the original "no-P2P blocks TP" conclusion was WRONG
+>
+> The earlier diagnosis below blamed the no-P2P `NODE` topology. A controlled isolation pass disproved that:
+>
+> - **Bare 2-GPU NCCL works.** A 2-rank `torch.distributed.all_reduce` in the same `vllm/vllm-openai:latest` image completes correctly across both GPUs **`via SHM/direct/direct`** (NCCL's shared-host-memory transport), with `NCCL_P2P_DISABLE=1 NCCL_CUMEM_ENABLE=0 --ipc=host`. Init 0.2 s, correct result. **No P2P is needed — NCCL falls back to SHM.** So multi-GPU vLLM/TP is *not* blocked here.
+> - **The model hangs identically under TP=2, PP=2, *and a single GPU*** (`CUDA_VISIBLE_DEVICES=0 -tp 1 --cpu-offload-gb 5`). Same freeze point every time: right after kernel selection (`FlashInferCutlassNvFp4LinearKernel` for NVFP4 + `Triton/FLA GDN` for the gated-delta-net linear attention), before `Model loading took` ever prints. CPU sits ~idle (a real deadlock, not slow JIT).
+> - **Conclusion:** since it deadlocks on a single GPU with no NCCL at all, the blocker is the **GDN (gated-delta-net) linear-attention init in this vLLM build**, not the interconnect. The "TP deadlocks at the first all-reduce" finding was a misattribution — `NCCL_DEBUG=INFO` printed no transport lines because vLLM never *reached* the collective; it hung earlier, the instant after `qwen_gdn_linear_attn.py:228 Using Triton/FLA GDN prefill kernel`.
+> - **It is quant-independent and has no config workaround.** Reproduced identically with NVFP4 *and* GPTQ-Int4/Marlin, under TP=2 / PP=2 / single-GPU, with MTP on/off, `--enforce-eager`, `--max-num-batched-tokens 2096`, and `--gpu-memory-utilization` from 0.45–0.92 (the "GDN Triton-autotuner needs free VRAM" theory was tested with ~9 GB free and 12 GB offloaded — **GPU util never spiked**, so the autotuner never even runs; the hang precedes it).
+> - **Not a version regression, and not a missing kernel.** Tested vLLM **v0.20.0** (the exact version a working 2×5060 Ti report used — [note.com 30 tok/s](https://note.com/cute_agapan9087/n/nb4b3456ca8b4)) **and v0.22.0** — both hang at the same GDN line. Replicating that report's command verbatim (`--trust-remote-code`, torch.compile path, `qwen3_5_mtp`, gpu-mem-util 0.88) didn't help.
+> - **Narrowed to the FLA (flash-linear-attention) GDN kernel specifically.** On this host: bare NCCL all-reduce works ✅, and a minimal `@triton.jit` kernel compiles+runs in 0.5 s ✅ (`triton 3.6.0 / torch 2.11.0+cu130`). So CUDA, the driver, NCCL, and *basic* Triton are all fine — only the FLA GDN linear-attention kernel deadlocks at first use. Quant-, parallelism-, and config-independent (NVFP4 + GPTQ-Int4/Marlin; TP/PP/single-GPU; MTP on/off; eager/compile; gpu-mem-util 0.45–0.92).
+> - **Most likely cause: this host's environment, not vLLM.** Since the same model+version runs for others on sm_120, the differences here are the prime suspects: **bleeding-edge driver `610.43.02`** and the **CachyOS custom kernel** (vs the working report's WSL2 + older driver). The FLA autotune/compile path appears to hang on this driver/kernel combo.
+>
+> **Implications:** (1) TP across these two GPUs is viable (slow, via SHM) — `--disable-custom-all-reduce` + `--ipc=host`. (2) The blocker is **this host's FLA-GDN environment, not the quant, the hardware, or the vLLM version.** Highest-probability fix: **a stable production NVIDIA driver** (610.x is beta-grade) and/or a **stock/LTS kernel**, then retry the note.com command. Secondary: a community sm_120 vLLM fork (`aliez-ren/vllm-qwen3.5-nvfp4-sm120`) or alt engines (`kekzl/imp`, `devnen/qwen3.6-windows-server`). Until then, **llama.cpp** is the working path (it implements GDN itself, no Triton/FLA dependency). See the corrected `configure-vllm` skill for the general no-P2P/TP rule.
 
-**Confirmed root cause: this motherboard has only one CPU-wired PCIe slot** (the 5070 Ti's). The 5060 Ti is therefore always chipset-attached (PCH), so the two cards can never have a peer-to-peer path — `nvidia-smi topo -m` shows `NODE` permanently. vLLM tensor-parallel needs P2P for its all-reduce; it can't get it here, and no env var / NCCL version / vLLM build can synthesize a P2P link that the board doesn't wire. (Ruled out along the way: NCCL was already 2.28.9 — newer than the ≥2.27.3 Blackwell floor — and we ran `--ipc=host`, so neither was the issue.) Others who run this exact GPU pair under vLLM TP have a board with **two CPU-wired slots**.
+Original findings (June 2026, vLLM 0.22.0 — kept for history, see correction above):
 
-This becomes viable only with a hardware change: a board exposing two CPU-direct slots (x8/x8 bifurcation) for dual-GPU TP, **or** a single ≥24 GB GPU for single-GPU. Until then, the dual-GPU path on this machine is **llama.cpp layer-split** (`Qwen3.6-27B-Q5-MTP`), which works precisely because layer-split is sequential and needs no P2P.
+- ~~**Single-GPU: impossible** (OOM, needs ≥24 GB).~~ It OOMs on weights *only if you don't offload*; with `--cpu-offload-gb` it loads and then hangs at model init — same as multi-GPU.
+- **Dual-GPU pipeline-parallel: rejected** — MTP's draft model doesn't implement vLLM's `SupportsPP` (`NotImplementedError`). *(Still true — but the base model also hangs under PP for the init reason above, so PP+MTP was never the real wall.)*
+- ~~**Dual-GPU tensor-parallel: deadlocks on the no-P2P `NODE` topology.**~~ **Reattributed:** the deadlock is the model's GDN linear-attention init (quant-independent), reproducible on a single GPU. NCCL/TP itself works fine here (bare all-reduce proven).
+
+The board having one CPU-wired slot (`NODE`, no P2P) is real, but it does **not** prevent vLLM TP — NCCL uses its SHM transport. A second CPU-wired slot or a ≥24 GB GPU would help *performance/fit*, not *feasibility*. Meanwhile the working dual-GPU path remains **llama.cpp layer-split** (`Qwen3.6-27B-Q5-MTP`).
 
 Best-known command to resume from *if the hardware ever changes* (furthest-progressing config; still hangs on the current board for the reason above):
 
@@ -183,7 +199,9 @@ Once it serves on `:8000`, wiring it into llama-swap is just a `cmd:`/`cmdStop:`
 
 ## Upgrade options & expected gains
 
-Analysis of what would actually move the needle, given the current bottleneck is the **5060 Ti** (448 GB/s, ~half the 5070 Ti's bandwidth) and the **single CPU-wired slot** (no GPU P2P).
+Analysis of what would actually move the needle, given the current bottleneck is the **5060 Ti** (448 GB/s, ~half the 5070 Ti's bandwidth) and the **single CPU-wired slot**.
+
+> **Note (2026-06-08):** the framing below treats "no GPU P2P" as a hard *feasibility* blocker for vLLM TP. Per the correction in "Parked: NVFP4 + MTP via vLLM", that's wrong — vLLM TP already *works* here over NCCL's SHM transport. So a second CPU-wired slot / P2P would improve **performance** (lower all-reduce latency), not unlock a capability that's currently impossible. The bandwidth ceiling and the mismatched-card sync penalty below are still the real limiters.
 
 Baseline today: **`Qwen3.6-27B-Q5-MTP`, llama.cpp layer-split, ~36–47 tok/s, 156k context.**
 
