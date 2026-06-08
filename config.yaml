@@ -143,20 +143,27 @@ models:
   # fit one 16 GB card. See README "Parked: NVFP4 + MTP via vLLM" for the full
   # investigation and the best-known command to resume from.
   gemma-4-31B-Q4-QAT:
+    # Tuned 2026-06-08: ~25 -> ~31 tok/s decode (measured, empty-context).
+    # Key change vs the old `--fit` config: bias layers onto the fast 5070 Ti
+    # (--tensor-split 2,1) instead of capacity-balancing onto the slow 5060 Ti,
+    # and drop the 156K context (which over-allocated KV and crowded the 5070).
+    # Measured split: 5070 ~14.5G / 5060 ~7.7G. Nudge --tensor-split toward "1,1"
+    # only if you raise -c and the 5070 OOMs; toward "2.3,1" for a bit more speed
+    # if the 5070 has headroom. -ub 512 keeps the 5060's prefill buffer safe.
     cmd: |
-      docker run --rm --name g31q6 --runtime nvidia --cap-add SYS_ADMIN
+      docker run --rm --name g31q4 --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /home/jim/models:/models
       --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
-      --fit on
-      --fit-ctx 156000
-      --fit-target 256
+      -ngl 99
+      -c 98304
+      --tensor-split 1.5,1
       -np 1
       -fa on
       --no-mmap
       --mlock
       -b 2048
-      -ub 2048
+      -ub 256
       -ctk q8_0
       -ctv q8_0
       --temp 0.6
@@ -172,7 +179,7 @@ models:
       --ctx-checkpoints 128
       --host 0.0.0.0
       --port 8080
-    cmdStop: docker stop g31q6
+    cmdStop: docker stop g31q4
   gemma-4-31B-Q6:
     cmd: |
       docker run --rm --name g31q6 --runtime nvidia --cap-add SYS_ADMIN
