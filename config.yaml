@@ -138,6 +138,62 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop q27mtp
+  # --- TENSOR-PARALLEL variant of Qwen3.6-27B-Q5-MTP (added 2026-06-08) ---
+  # A/B against Qwen3.6-27B-Q5-MTP. Real tensor parallelism via `-sm tensor` (the
+  # non-deprecated TP mode; `-sm row` is deprecated). Measured FASTER than the
+  # layer-split prod entry: ~39.5 vs ~35 tok/s decode (Q5_K_XL, +MTP, 2x16GB).
+  #
+  # Why the extra docker flags (full story in README "Tensor parallelism"):
+  #  - The image's bundled NCCL 2.25.1 has a broken sm_120 (RTX 50-series) kernel
+  #    launch, so `-sm tensor` aborts at the first all-reduce with
+  #    "Cuda failure 1 'invalid argument'". Preloading NCCL 2.30.4 fixes it.
+  #    This was the real blocker -- NOT the no-P2P topology and NOT the driver.
+  #  - --ipc=host lifts Docker's 64 MB /dev/shm cap so NCCL's SHM transport works
+  #    (the two GPUs have no P2P; NCCL connects via SHM/direct).
+  #  - --fit off: llama_params_fit is not implemented for SPLIT_MODE_TENSOR.
+  # Fit note: at -c 156000, GPU0 sits ~800 MiB free (it also holds the ~1 GB
+  # desktop). If GPU0 OOMs, lower -c or bias weights to GPU1 (--tensor-split 1,1.2).
+  # Vendored lib (vendor/libnccl.so.2.30.4) is git-ignored; refetch with:
+  #   pip download --no-deps nvidia-nccl-cu12  (then unzip the wheel)
+  Qwen3.6-27B-Q5-MTP-TP:
+    cmd: |
+      docker run --rm --name q27mtptp --runtime nvidia --cap-add SYS_ADMIN
+      --ipc=host
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
+      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.6-27B-UD-Q5_K_XL.gguf
+      -ngl 99
+      --flash-attn on
+      -sm tensor
+      --fit off
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 3
+      --spec-ngram-mod-n-match 40
+      --spec-ngram-mod-n-min 0
+      --spec-ngram-mod-n-max 16
+      -b 2048
+      -c 108000
+      -ctk q8_0
+      -ctv q8_0
+      --main-gpu 0
+      --tensor-split 1.2,1
+      -np 1
+      -ub 512
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.05
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q27mtptp
   # NVFP4 + MTP via vLLM is parked — it loads but dual-GPU TP deadlocks at the
   # first all-reduce on this NODE (no-P2P) topology, and the ~15 GB model won't
   # fit one 16 GB card. See README "Parked: NVFP4 + MTP via vLLM" for the full
@@ -180,6 +236,56 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop g31q4
+  # gemma-4-31B-Q4-QAT + MTP assistant (added 2026-06-09). Measured ~30 -> ~50 tok/s
+  # decode (~1.68x), ~61-63% draft acceptance.
+  #
+  # Why a DIFFERENT image (ggml-org, not mostlygeek): the MTP draft is a separate
+  # `gemma4-assistant` model (arch new in llama.cpp >= 9570). mostlygeek's newest is
+  # only b9544, so it can't load the assistant yet. The ggml-org image is b9570 and
+  # its entrypoint is already /app/llama-server. Caveat: it ships NO NCCL, so it
+  # CANNOT do `-sm tensor` TP -- that path stays on the mostlygeek image. When
+  # mostlygeek ships >= b9570, this can move back to it (keeps NCCL + MTP in one image).
+  #
+  # MTP wiring: -md <assistant> + --spec-type draft-mtp; the assistant has
+  # nextn_predict_layers=4 so --spec-draft-n-max 4. -c trimmed to 65536 and
+  # --tensor-split eased to 1.3,1 to leave the 5070 Ti room for the draft alongside
+  # the main model. If the 5070 OOMs, lower -c further or pin the draft to the 5060
+  # with `-devd CUDA1`.
+  gemma-4-31B-Q4-MTP:
+    cmd: |
+      docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+      -md /models/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 4
+      -ngl 99
+      -ngld 99
+      -c 65536
+      --tensor-split 1.3,1
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 256
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 64
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g31mtp
   gemma-4-31B-Q6:
     cmd: |
       docker run --rm --name g31q6 --runtime nvidia --cap-add SYS_ADMIN

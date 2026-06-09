@@ -17,6 +17,8 @@ The 5060 Ti is **chipset-attached** rather than on CPU-direct lanes; it shares D
 
 **Root cause (confirmed June 2026): the 5060 Ti was improperly seated.** Reseating it resolved the failure. Everything below was diagnosed *before* that was found; the `pcie_aspm=off` kernel parameter cut the failure rate by reducing PCIe link-power transitions, but it was masking a mechanical fault, not curing one.
 
+> **Recurs under tensor parallelism (2026-06-09) — different cause.** This was resolved for normal **layer-split** inference, but enabling `-sm tensor` drops the 5060 Ti again, almost immediately. That is *not* the seating/ASPM fault (both already fixed) — it's the card's **chipset PCIe 4.0 x1 slot** being unable to take TP's sustained per-layer all-reduce traffic. Fix is physical (move it to a CPU-direct x4 link): see [the TP stability blocker](#tp-stability-blocker--sm-tensor-drops-the-5060-ti-off-the-bus).
+
 ### Symptom
 
 While `qwen3.6-27B-Q6` was loaded (splits weights across both GPUs via `--tensor-split 1,1`), the 5060 Ti would disappear from `nvtop` mid-inference. Kernel log:
@@ -103,26 +105,127 @@ The OOM only showed up on **large prompts**, because that's when the oversized p
 - `--tensor-split 1,1` balances **weights** only. KV cache and the prefill compute buffer land unevenly, so the nominally-equal split can still saturate one card first. Nudge the split toward the underloaded GPU (e.g. `--tensor-split 1.1,1`) and watch `nvidia-smi` until both cards sit at similar used-MiB.
 - The display/desktop also consumes ~750 MiB on GPU 0, further skewing the "equal" split.
 
-### Do not use tensor parallelism (`-sm tensor`)
+### Tensor parallelism (`-sm tensor`) — WORKS, and is the fastest option
 
-Tensor parallelism is **not usable on this machine** — use the default layer split (`-sm layer`). The two GPUs sit on **separate PCIe host bridges** (the 5070 Ti on CPU-direct lanes, the 5060 Ti on the PCH), so there is **no peer-to-peer path** between them:
+> **History:** this section previously said TP was "not usable" because the no-P2P
+> `NODE` topology blocked NCCL. **That was wrong, twice over.** TP works on this
+> machine, and `-sm tensor` + MTP is the *fastest* config measured for the 27B.
+> The real blocker was a **stale NCCL in the llama.cpp image**, not the hardware
+> and not the driver. Details below; the working entry is `Qwen3.6-27B-Q5-MTP-TP`.
+
+**Measured decode throughput** (Qwen3.6-27B Q5_K_XL, 2×16 GB, identical prompt):
+
+| split mode | no MTP | + MTP |
+|---|---|---|
+| `-sm layer` (pipelined, default) | 25.2 tok/s | ~35 tok/s |
+| `-sm row` (TP, **deprecated**) | 20.3 tok/s | ~29 tok/s |
+| **`-sm tensor` (TP)** | **~30 tok/s** | **~39.5 tok/s** ✅ |
+
+So real tensor parallelism is **~13% faster than layer split** with MTP, ~19% faster
+without. (`-sm row` is the *old* row-split TP — it works but is both deprecated and
+slower; ignore it.) `-sm tensor` also splits the KV cache across both cards.
+
+**What actually blocked it.** Three red herrings and one real cause:
+
+1. **Topology / no-P2P is NOT the blocker.** The two GPUs are on separate PCIe host
+   bridges (`nvidia-smi topo -m` shows `NODE`, no P2P), but NCCL connects fine over
+   its **SHM transport** — the logs show `Channel 00 : 0[0] -> 1[1] via SHM/direct`
+   and `Init COMPLETE`. This just needs `--ipc=host` to lift Docker's 64 MB
+   `/dev/shm` cap (plus `NCCL_P2P_DISABLE=1 NCCL_CUMEM_ENABLE=0` to match the
+   known-good config; these may be droppable on newer NCCL).
+2. **The 610.x beta driver is NOT the blocker** (it was suspected — it's fine here).
+3. **NCCL tuning is NOT the blocker** — the failure was invariant to `NCCL_PROTO`,
+   `NCCL_ALGO`, `NCCL_CGA_CLUSTER_SIZE`, `NCCL_NVLS_ENABLE`, `NCCL_LAUNCH_MODE`, and
+   `GGML_CUDA_DISABLE_GRAPHS`.
+4. **The real cause: the image's bundled NCCL 2.25.1 has a broken `sm_120`
+   (RTX 50-series) kernel launch.** NCCL connects, then aborts at the *first*
+   all-reduce:
+
+   ```
+   ggml_backend_cuda_comm_allreduce_nccl ... ncclGroupEnd()
+   enqueue.cc:1500 NCCL WARN Cuda failure 1 'invalid argument'
+   ```
+
+   (NCCL 2.25.1 *does* ship `sm_120` cubins, so it's not a missing-arch gap — the
+   launch path itself is buggy for consumer Blackwell.) **Fix: preload a newer NCCL.**
+   NCCL **2.30.4** makes `-sm tensor` work flawlessly.
+
+**The fix, baked into `Qwen3.6-27B-Q5-MTP-TP`:**
 
 ```
-$ nvidia-smi topo -m
-       GPU0   GPU1
-GPU0    X     NODE      # NODE = traverses PCIe host bridges (via the CPU/DMI) — no P2P
-GPU1   NODE    X
+--ipc=host                                              # NCCL SHM transport (no P2P needed)
+-e LD_PRELOAD=/opt/newnccl/libnccl.so.2                 # use NCCL 2.30.4, not the image's 2.25.1
+-v .../vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+-e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+-sm tensor --fit off                                    # --fit is unimplemented for SPLIT_MODE_TENSOR
 ```
 
-`-sm tensor` runs on NCCL, which requires GPU↔GPU P2P. Without it, NCCL cannot establish its transport and `llama-server` aborts during warm-up:
+The 412 MB NCCL lib lives in `vendor/` (git-ignored). Refetch with:
+`pip download --no-deps nvidia-nccl-cu12` then unzip the wheel
+(`nvidia/nccl/lib/libnccl.so.2`).
+
+**Fit caveat:** at `-c 156000`, GPU0 sits ~800 MiB free (it also carries the ~1 GB
+desktop). If it OOMs, lower `-c` or bias weights to GPU1 (`--tensor-split 1,1.2`).
+
+**Tuning lever (untested):** the cards are mismatched (5070 Ti vs 5060 Ti) and TP
+syncs every layer, so the fast card waits on the slow one. `--tensor-split` could be
+biased toward the 5070 Ti to rebalance compute — worth an experiment.
+
+### TP stability blocker: `-sm tensor` drops the 5060 Ti off the bus
+
+⚠️ **(2026-06-09)** TP **works and is the fastest config**, but on the **current slot layout it is not
+usable** — running `Qwen3.6-27B-Q5-MTP-TP` drops the 5060 Ti off the bus almost
+immediately, where layer-split ran stable for a week. Same signature as the
+[falling-off-the-bus](#resolved-second-gpu-falling-off-the-bus-under-inference-load)
+section, but a **different trigger** (and `pcie_aspm=off` is already applied, so it is
+*not* ASPM this time):
 
 ```
-CUDA error: unhandled cuda error (run with NCCL_DEBUG=INFO for details)
+$ nvidia-smi
+Unable to determine the device handle for GPU1: 0000:84:00.0: Unknown Error
+$ lspci | grep 84:00.0          # card is still ON the bus (config space readable)
+84:00.0 VGA compatible controller: NVIDIA ... GeForce RTX 5060 Ti
+$ cat /sys/bus/pci/devices/0000:84:00.0/current_link_width   # 63  (garbage — link is dead)
+$ cat /sys/bus/pci/devices/0000:84:00.0/current_link_speed   # Unknown
 ```
 
-(Docker also caps the container's `/dev/shm` at 64 MB by default, which independently breaks NCCL's shared-memory fallback.)
+**Root cause: the 5060 Ti sits in a chipset PCIe 4.0 *x1* slot, and TP's traffic
+pattern kills that link.** Layer split passes one activation handoff per layer
+boundary (light, one-directional). `-sm tensor` does an **all-reduce every layer**
+(bidirectional, sustained) — the worst case for a narrow, marginal link. A x1 link
+has no lanes to spare, so accumulated PCIe errors under continuous traffic cascade to
+an unrecoverable link drop. It survived benchmarking (~39 tok/s) then dropped, i.e.
+it fails *after* sustained stress, not instantly.
 
-> **Correction (2026-06-08):** the premise "NCCL needs P2P, can't establish transport here" is **false** — NCCL works across these two GPUs **via its SHM transport** when given `--ipc=host` (so `/dev/shm` isn't capped at 64 MB) plus `NCCL_P2P_DISABLE=1`. Proven with a bare 2-rank all-reduce (see "Parked: NVFP4 + MTP via vLLM"). The original `-sm tensor` abort was almost certainly the **64 MB `/dev/shm` cap** the parenthetical already flagged, not a fundamental P2P requirement. Layer split is still the simpler default and avoids the every-layer all-reduce tax over the x4 chipset link — so **stick to layer split for performance**, but not because TP is impossible. (Whether `-sm tensor` is actually *faster* here, given the SHM-staged all-reduce over x4, is untested.)
+**Planned fix — move the 5060 Ti to a CPU-direct x4 link via an M.2 riser:**
+
+- Put the 5060 Ti on **`M2A_CPU`** (CPU-connected, **PCIe 5.0 x4**) through an
+  **M.2 → PCIe x4 riser**, capped at **Gen3** (Gen3 over a riser cable is far more
+  signal-integrity-tolerant than Gen4/5 — stability over peak bandwidth).
+- Relocate the slow NVMe currently in `M2A_CPU` to a **PCIe x1 slot** via a passive
+  **x1 → M.2 NVMe adapter** (those slots are PCIe 4.0 x1 ≈ 2 GB/s — fine for a
+  secondary drive).
+- **The board manual confirms this costs nothing on the primary slot:** on the
+  B860 DS3H WIFI6E, `PCIEX16` (CPU, PCIe 5.0 x16) and `M2A_CPU` (CPU, PCIe 5.0 x4)
+  are on **separate dedicated CPU lanes** — there is **no bifurcation note**, so
+  populating `M2A_CPU` does **not** drop `PCIEX16` to x8. The 5070 Ti keeps full x16.
+  (The footnote *"PCIEX16 can only support a graphics card or an NVMe SSD"* describes
+  what may be installed there — it is **not** a lane-share warning.)
+
+**Expected result:** link **x1 → x4** (Gen3 ≈ 3.9 GB/s, up from ~1–2 GB/s) and both
+GPUs onto the CPU root complex, so `nvidia-smi topo -m` should change **`NODE` → `PHB`**
+(no DMI hop/contention). This should both **stop the drops** and likely make TP
+*faster* than the ~39 tok/s measured (those numbers were over the x1 link). P2P still
+won't appear (consumer Intel), so TP stays on NCCL SHM — just much healthier.
+
+**Watch-outs:** riser cable quality is the #1 stability variable (a cheap ribbon
+riser re-creates the exact drop); use a **powered** adapter (the slot's 75 W can't come
+from M.2); after install confirm `lspci -vv -s <bus> | grep LnkSta` shows `Width x4,
+Speed 8GT/s` and re-check `nvidia-smi topo -m`.
+
+**Status: riser to be purchased (2026-06-09).** Until it's in, keep TP off in
+production — `Qwen3.6-27B-Q5-MTP` (layer+MTP, ~35 tok/s) remains the stable default,
+which is why the TP entry is a separate opt-in variant.
 
 ## Deployment
 
@@ -205,16 +308,23 @@ Analysis of what would actually move the needle, given the current bottleneck is
 
 Baseline today: **`Qwen3.6-27B-Q5-MTP`, llama.cpp layer-split, ~36–47 tok/s, 156k context.**
 
+### M.2 → PCIe x4 riser for the 5060 Ti (cheapest — enables stable TP) ⭐
+- **The plan:** move the 5060 Ti off its chipset **PCIe 4.0 x1** slot onto **`M2A_CPU`** (CPU-direct PCIe 5.0 x4) via an **M.2 → PCIe x4 riser** capped at Gen3; relocate the slow NVMe to a PCIe x1 slot via an x1→M.2 adapter. Full detail + manual citations in the TP section's [stability blocker](#tp-stability-blocker--sm-tensor-drops-the-5060-ti-off-the-bus).
+- **Unlocks:** the 5060 Ti's link goes **x1 → x4** (Gen3 ≈ 3.9 GB/s) and onto CPU lanes (`NODE → PHB`), which is what makes **`-sm tensor` (llama.cpp TP) stable** — currently TP drops the card off the bus on the x1 link. Also ends the chipset/DMI bus-fragility.
+- **Realistic decode:** **`-sm tensor` + MTP ≈ 40+ tok/s** (vs ~35 layer+MTP), possibly higher than the ~39 measured since that was over the x1 link. ~10–15%+ for the price of a riser.
+- **Caveats:** riser cable quality is the stability variable; needs a powered adapter; the 5070 Ti keeps full x16 (manual-confirmed, no bifurcation). Does **not** help vLLM (that's blocked by the FLA-GDN issue, not the interconnect).
+
 ### Z890 board with two CPU-wired x8/x8 slots
-- **Unlocks:** both GPUs on CPU lanes → P2P → vLLM tensor-parallel works → **NVFP4 + MTP across both cards** becomes possible. Also removes the 5060 Ti from the chipset/DMI link (ends the "fallen off the bus" fragility).
+- **Unlocks:** both GPUs on CPU lanes → P2P → vLLM tensor-parallel works → **NVFP4 + MTP across both cards** becomes possible. Also removes the 5060 Ti from the chipset/DMI link (ends the "fallen off the bus" fragility). *(Note: the M.2-riser option above already gets the 5060 Ti onto CPU lanes for far less — the Z890's extra value is the full x8 width and a clean second slot, not a unique capability.)*
 - **Realistic decode:** **~50–70 tok/s (≈1.3–1.7×)**, *not* 2×. Gains come mostly from NVFP4 (~20–30% less bandwidth/token) and native FP4 **prefill** (the long-prompt win); TP parallelism adds less than hoped.
 - **Why it's capped:**
   - **No NVLink** — P2P would be over **PCIe Gen4 x8 (~16 GB/s, capped by the Gen4 5060 Ti)**. TP all-reduces every layer; that interconnect latency eats much of the parallelism. Consumer no-NVLink TP often nets only ~1.2–1.5× over layer-split for single-stream.
   - **Mismatched cards** — TP syncs every step, so the 5070 Ti waits on the 5060 Ti. No board fixes this. (This is why matched 2×3090 setups hit ~70 tok/s and this pair won't.)
 
 ### Ranked by speed-per-spend
-1. **Single ≥24 GB GPU** (e.g. used 3090/4090-class or a 24 GB Blackwell) — biggest gain: runs the model on one fast card, no inter-GPU penalty at all, and unlocks single-GPU NVFP4+MTP. Removes both bottlenecks.
-2. **Replace the 5060 Ti with a matched 5070 Ti** — fixes the bandwidth ceiling *and* TP balance; would need the Z890 board too for P2P.
-3. **Z890 x8/x8 board (5060 Ti kept)** — cheapest, unlocks the most *capability* (vLLM NVFP4+MTP) but delivers the least *speed* (~1.3–1.7×). Good if the goal is the NVFP4 capability + ending bus-fragility, not raw tok/s.
+1. **M.2 → PCIe x4 riser (5060 Ti onto `M2A_CPU`)** — by far the cheapest. Makes llama.cpp `-sm tensor` TP *stable* (≈40+ tok/s vs ~35 layer+MTP) and ends bus-fragility, with zero new silicon. The obvious first move; everything below is a bigger spend.
+2. **Single ≥24 GB GPU** (e.g. used 3090/4090-class or a 24 GB Blackwell) — biggest gain: runs the model on one fast card, no inter-GPU penalty at all, and unlocks single-GPU NVFP4+MTP. Removes both bottlenecks.
+3. **Replace the 5060 Ti with a matched 5070 Ti** — fixes the bandwidth ceiling *and* TP balance; would need the Z890 board too for P2P.
+4. **Z890 x8/x8 board (5060 Ti kept)** — unlocks the most vLLM *capability* (NVFP4+MTP) but delivers little *speed* (~1.3–1.7×), and the riser already gets the 5060 Ti onto CPU lanes for a fraction of the cost. Good only if the goal is the NVFP4/vLLM path + full x8 width.
 
-Bottom line: the board is the cheapest unlock but the 5060 Ti remains the ceiling. For raw speed, upgrade the *GPU* before the board.
+Bottom line: **try the riser first** — it's the cheapest unlock and directly fixes the TP stability problem. Beyond that, the 5060 Ti remains the ceiling, so for raw speed upgrade the *GPU* before the board.

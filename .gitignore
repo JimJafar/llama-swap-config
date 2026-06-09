@@ -1,0 +1,2 @@
+# vendored NCCL (refetch: pip download --no-deps nvidia-nccl-cu12)
+vendor/
