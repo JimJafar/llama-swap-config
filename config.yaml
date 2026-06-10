@@ -119,7 +119,7 @@ models:
 
       # --kv-unified
       -b 2048
-      -c 156000
+      -c 142000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
@@ -138,21 +138,31 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop q27mtp
-  # --- TENSOR-PARALLEL variant of Qwen3.6-27B-Q5-MTP (added 2026-06-08) ---
-  # A/B against Qwen3.6-27B-Q5-MTP. Real tensor parallelism via `-sm tensor` (the
-  # non-deprecated TP mode; `-sm row` is deprecated). Measured FASTER than the
-  # layer-split prod entry: ~39.5 vs ~35 tok/s decode (Q5_K_XL, +MTP, 2x16GB).
+  # --- TENSOR-PARALLEL variant of Qwen3.6-27B-Q5-MTP ---
+  # Real tensor parallelism via `-sm tensor` (non-deprecated TP mode; `-sm row` is
+  # deprecated). WORKING & FASTEST 27B config (riser fitted 2026-06-10):
+  # 54-64 tok/s decode vs ~35 layer+MTP, and stable -- both GPUs ~93-96% util, so
+  # the interconnect is no longer the bottleneck. Full story in README "Tensor
+  # parallelism".
   #
-  # Why the extra docker flags (full story in README "Tensor parallelism"):
-  #  - The image's bundled NCCL 2.25.1 has a broken sm_120 (RTX 50-series) kernel
-  #    launch, so `-sm tensor` aborts at the first all-reduce with
-  #    "Cuda failure 1 'invalid argument'". Preloading NCCL 2.30.4 fixes it.
-  #    This was the real blocker -- NOT the no-P2P topology and NOT the driver.
-  #  - --ipc=host lifts Docker's 64 MB /dev/shm cap so NCCL's SHM transport works
-  #    (the two GPUs have no P2P; NCCL connects via SHM/direct).
-  #  - --fit off: llama_params_fit is not implemented for SPLIT_MODE_TENSOR.
-  # Fit note: at -c 156000, GPU0 sits ~800 MiB free (it also holds the ~1 GB
-  # desktop). If GPU0 OOMs, lower -c or bias weights to GPU1 (--tensor-split 1,1.2).
+  # Two blockers had to fall (both fixed):
+  #  1. Software: the image's bundled NCCL 2.25.1 has a broken sm_120 kernel launch,
+  #     so `-sm tensor` aborted at the first all-reduce ("Cuda failure 1 'invalid
+  #     argument'"). Fixed by preloading NCCL 2.30.4 (LD_PRELOAD + vendor mount
+  #     below). NOT a P2P or driver problem -- NCCL connects fine over SHM.
+  #  2. Hardware: on the old chipset PCIe x1 slot, TP's sustained all-reduce dropped
+  #     the 5060 Ti off the bus. Fixed by moving it to a CPU-direct Gen4 x4 link
+  #     (M.2 riser into M2A_CPU). topo: NODE -> PHB. Layer-split was unaffected;
+  #     only TP's continuous all-reduce stressed the x1 link enough to kill it.
+  #  - --ipc=host lifts Docker's 64 MB /dev/shm cap (NCCL SHM transport).
+  #  - --fit off: llama_params_fit is unimplemented for SPLIT_MODE_TENSOR.
+  #
+  # GPU-ORDER GOTCHA: after the riser, nvidia-smi lists the 5060 Ti as GPU0 (it's on
+  # the lower PCI bus now). But llama.cpp orders FASTEST_FIRST, so CUDA0 = 5070 Ti.
+  # --tensor-split maps to CUDA order, so the FIRST number is the 5070 Ti. 1.2,1
+  # biases work onto the fast 5070 (balances per-layer compute on the mismatched
+  # pair). Memory tradeoff: 1.2,1 runs the 5070 ~93% / 5060 ~70%. If the 5070 OOMs
+  # on a big prefill, ease toward 1,1 (or 1,1.1 to lean on the 5060's spare ~5 GB).
   # Vendored lib (vendor/libnccl.so.2.30.4) is git-ignored; refetch with:
   #   pip download --no-deps nvidia-nccl-cu12  (then unzip the wheel)
   Qwen3.6-27B-Q5-MTP-TP:
@@ -262,7 +272,7 @@ models:
       --spec-draft-n-max 4
       -ngl 99
       -ngld 99
-      -c 65536
+      -c 75536
       --tensor-split 1.3,1
       -np 1
       -fa on
