@@ -169,12 +169,15 @@ The 412 MB NCCL lib lives in `vendor/` (git-ignored). Refetch with:
 `pip download --no-deps nvidia-nccl-cu12` then unzip the wheel
 (`nvidia/nccl/lib/libnccl.so.2`).
 
-**Fit caveat:** at `-c 156000`, GPU0 sits ~800 MiB free (it also carries the ~1 GB
-desktop). If it OOMs, lower `-c` or bias weights to GPU1 (`--tensor-split 1,1.2`).
+**Fit caveat:** the 5070 Ti (`CUDA1` — see the GPU-order note below) carries the
+desktop + the MTP draft context and fills first. If it OOMs, lower `-c` or shift weight
+onto the 5060 by raising the *first* split number. See "Balancing & context" below —
+and note the VRAM-fill `-c` is **not** the safe operating point.
 
-**Tuning lever (untested):** the cards are mismatched (5070 Ti vs 5060 Ti) and TP
-syncs every layer, so the fast card waits on the slow one. `--tensor-split` could be
-biased toward the 5070 Ti to rebalance compute — worth an experiment.
+**Tuning lever:** the cards are mismatched (5070 Ti vs 5060 Ti) and TP syncs every
+layer, so the fast card waits on the slow one — a decode-speed cap no split fixes. The
+split/`-c` tuning in "Balancing & context" below is about VRAM balance and stable
+context, not speed.
 
 ### TP stability: 5060 Ti x1-slot drop, fixed by an M.2 riser
 
@@ -223,16 +226,28 @@ $ nvidia-smi topo -m                                         # GPU0<->GPU1 = PHB
   DMI contention**. Going CPU-direct (`NODE → PHB`) cut the round-trip; both GPUs now
   sit at 93–96% util instead of stalling on each sync.
 
-**⚠️ GPU-order gotcha (bit us once).** After the riser the 5060 Ti enumerates on the
-lower PCI bus, so **`nvidia-smi` now lists it as GPU0**. But llama.cpp orders devices
-**FASTEST_FIRST**, so inside every container **`CUDA0` is still the 5070 Ti**
-(confirm via the container's `device_info`). `--tensor-split` maps to **CUDA** order,
-so the *first* number is the 5070 Ti — unchanged. Don't "flip" splits to chase the
-nvidia-smi numbering; that sends the larger share to the slow card.
+**⚠️ GPU-order gotcha (bit us, twice).** After the riser the 5060 Ti enumerates on the
+lower PCI bus (`01:00`), so `nvidia-smi` lists it as GPU0. We *assumed* llama.cpp's
+**FASTEST_FIRST** order would still rank the bigger 5070 Ti as `CUDA0` — **it does not.**
+Both cards are Blackwell (sm_120) and tie on compute capability, so FASTEST_FIRST falls
+back to PCI-bus order: **`CUDA0` = 5060 Ti (`01:00`), `CUDA1` = 5070 Ti (`02:00`)** —
+same as nvidia-smi. Confirmed empirically: biasing the split onto `CUDA1` OOMs the MTP
+draft context on the 5070. So `--tensor-split a,b` = `5060,5070`; raise the **first**
+number to shift load onto the 5060. The TP entry now pins
+`-e CUDA_DEVICE_ORDER=PCI_BUS_ID` to keep this deterministic across reboots and driver
+updates.
 
-**Memory tradeoff.** `--tensor-split 1.2,1` biases work onto the fast 5070 (good for
-the mismatched pair) but runs it ~93% / 5060 ~70%. If the 5070 OOMs on a long-context
-prefill, ease toward `1,1` (or `1,1.1` to lean on the 5060's spare ~5 GB).
+**Balancing & context (tuned 2026-06-11).** The 5070 Ti (`CUDA1`) is overhead-bound —
+it carries the desktop + the MTP draft context, so it parks ~82–84% almost regardless
+of the split, and pushing *weight* onto it (raising the 2nd number) OOMs the draft. The
+5060 Ti (`CUDA0`) is the elastic card — tiny split changes swing it a lot. So the split
+only *balances* the pair; the knob that adds total VRAM is `-c`, since KV cache lands on
+both cards by the split ratio and fills the 5070 headroom the split can't reach.
+Balancing to ~equal near `--tensor-split 1.01,1` then raising `-c` reached **89% (5070)
+/ 96% (5060) at ~185k context** — but that's the *VRAM-fill* point and it **OOMs under a
+real long-context prefill**. Backed off to a conservative **`-c 80000`** for headroom.
+Lesson: tune the split for balance, but keep `-c` well below the fill point — the safe
+ceiling is meaningfully lower than what loads at idle.
 
 `Qwen3.6-27B-Q5-MTP-TP` is now a strong candidate to **become the default 27B** —
 fastest and stable. Left as an explicit variant pending a longer no-drop soak.

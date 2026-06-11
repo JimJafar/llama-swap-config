@@ -93,8 +93,9 @@ models:
   #  - --ipc=host lifts Docker's 64 MB /dev/shm cap so NCCL's SHM transport works
   #    (the two GPUs have no P2P; NCCL connects via SHM/direct).
   #  - --fit off: llama_params_fit is not implemented for SPLIT_MODE_TENSOR.
-  # Fit note: at -c 156000, GPU0 sits ~800 MiB free (it also holds the ~1 GB
-  # desktop). If GPU0 OOMs, lower -c or bias weights to GPU1 (--tensor-split 1,1.2).
+  # Fit note (post-riser): device1 = 5070 Ti holds the desktop + draft ctx and fills
+  # first; raise the 1st tensor-split number to relieve it (NOT 1,1.2). Keep -c well
+  # below the VRAM-fill point -- ~185k loads but OOMs under prefill. See inline below.
   # Vendored lib (vendor/libnccl.so.2.30.4) is git-ignored; refetch with:
   #   pip download --no-deps nvidia-nccl-cu12  (then unzip the wheel)
   Qwen3.6-27B-Q5-MTP-TP:
@@ -118,17 +119,18 @@ models:
       --spec-ngram-mod-n-min 0
       --spec-ngram-mod-n-max 16
       -b 2048
-      # -c was 108000; pushing context up now that the split is ~balanced (~1.01,1)
-      -c 185000
+      # -c: filling VRAM toward ~90% (~185k -> 89/96) OOMs under a real prefill load;
+      # backed off to a conservative 80000 for headroom (2026-06-11).
+      -c 80000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
       # device0,device1 = 5060 Ti (01:00), 5070 Ti (02:00) under the pinned PCI order.
-      # Strategy: equalize BOTH cards low via the split, THEN raise -c. The split moves
-      # model weight (and the 5070 holds little — mostly desktop + the draft context that
-      # OOMs first), but -c adds KV cache, which lands on BOTH cards by this ratio and
-      # fills the 5070 headroom the split can't reach. ~1,1 sits both ~equal (~83-84%);
-      # the 5060 is hypersensitive to this knob, so move it in small steps.
+      # The split only BALANCES the pair: 5070 = device1 is overhead-bound (desktop +
+      # draft ctx) so it barely moves; the 5060 is hypersensitive, so step it gently.
+      # -c is what adds total VRAM: KV lands on both cards by this ratio, filling the
+      # 5070 headroom the split can't reach. NOTE: filling to ~90% (~185k -> 89/96) is
+      # NOT stable -- it OOMs on a long-context prefill, hence the conservative -c above.
       # Tune: 5070 hotter or draft OOMs -> raise 1st num; 5060 hotter -> lower it.
       --tensor-split 1.01,1
       -np 1
