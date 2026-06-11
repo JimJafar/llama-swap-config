@@ -8,6 +8,11 @@
 # Shared docker flags for llama.cpp models:
 #   --runtime nvidia --cap-add SYS_ADMIN  (matches the previously-working setup)
 #   --entrypoint /app/llama-server        (image entrypoint is llama-swap)
+#
+# Max seconds to wait for a model to become ready after launch. Raised from the 120s
+# default for the vLLM entry (qwen36-nvfp4), which takes ~180s to load + capture graphs.
+healthCheckTimeout: 300
+
 models:
   qwen3.6-35B-Q4:
     cmd: |
@@ -147,10 +152,34 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop q27mtptp
-  # NVFP4 + MTP via vLLM is parked — it loads but dual-GPU TP deadlocks at the
-  # first all-reduce on this NODE (no-P2P) topology, and the ~15 GB model won't
-  # fit one 16 GB card. See README "Parked: NVFP4 + MTP via vLLM" for the full
-  # investigation and the best-known command to resume from.
+  # --- vLLM NVFP4 + MTP (WORKS as of 2026-06-11; see README "RESOLVED: NVFP4 + MTP via vLLM") ---
+  # ~56 tok/s single-stream (TP=2 + qwen3_next_mtp MTP, ~80% draft accept), ~355 tok/s peak
+  # batched. Tied with llama.cpp single-stream; wins only under concurrency. Uses the
+  # vllm/vllm-openai image (NOT mostlygeek) and the local 19 GB model at vllm-direct/.
+  # Gotchas baked in: --language-model-only (checkpoint is declared multimodal), the MTP
+  # method is "qwen3_next_mtp" (not "mtp"), util 0.85 clears the 5070 desktop on vLLM's
+  # startup memory pre-check. Slow start (~180s) -> relies on healthCheckTimeout (top).
+  qwen36-nvfp4:
+    cmd: |
+      docker run --rm --name qwen36nvfp4 --runtime nvidia --ipc=host
+      -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=0,1
+      -e NCCL_P2P_DISABLE=1 -e NCCL_SHM_DISABLE=0 -e NCCL_IB_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e VLLM_NO_USAGE_STATS=1
+      -p ${PORT}:8000 -v /home/jim/models:/models
+      vllm/vllm-openai:v0.22.0
+      --model /models/vllm-direct/Qwen3.6-27B-Text-NVFP4-MTP
+      --served-model-name qwen36-nvfp4
+      --tensor-parallel-size 2
+      --max-model-len 32768
+      --max-num-seqs 1
+      --gpu-memory-utilization 0.85
+      --disable-custom-all-reduce
+      --trust-remote-code
+      --language-model-only
+      --speculative-config "{\"method\":\"qwen3_next_mtp\",\"num_speculative_tokens\":1}"
+      --host 0.0.0.0
+      --port 8000
+    cmdStop: docker stop qwen36nvfp4
   gemma-4-31B-Q4-QAT:
     # Tuned 2026-06-08: ~25 -> ~31 tok/s decode (measured, empty-context).
     # Key change vs the old `--fit` config: bias layers onto the fast 5070 Ti

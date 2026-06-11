@@ -257,7 +257,7 @@ fastest and stable. Left as an explicit variant pending a longer no-drop soak.
 llama-swap runs as a **host binary** from the `llama-swap-bin` AUR package (`/usr/bin/llama-swap`), driven by a systemd unit. It launches **each model as its own docker container** and stops it on swap (`cmdStop`), so only one model holds VRAM at a time:
 
 - **llama.cpp models** use the `ghcr.io/mostlygeek/llama-swap:cuda` image with the entrypoint overridden to `/app/llama-server` (the image's entrypoint is `llama-swap` itself).
-- **vLLM models** (NVFP4 + MTP) are **parked** — not currently wired up. See "Parked: NVFP4 + MTP via vLLM" below for why and how to resume.
+- **vLLM models** (NVFP4 + MTP) **work** as of 2026-06-11 (not yet wired into llama-swap). See "RESOLVED: NVFP4 + MTP via vLLM" below for the working recipe + benchmarks.
 
 The systemd unit is tracked at [`llama-swap.service`](llama-swap.service) and installed to `/etc/systemd/system/llama-swap.service` (it shadows the AUR vendor unit at `/usr/lib/systemd/system/`, which uses `DynamicUser=yes` and so can't access docker). It runs as `jim` (in the `docker` group), listens on `0.0.0.0:8033`, and uses `-watch-config` so `config.yaml` edits live-reload without a restart.
 
@@ -269,7 +269,7 @@ Three independently-versioned pieces:
 paru -S llama-swap-bin                 # 1. llama-swap host binary (AUR)
 ./update.sh                            # 2. llama.cpp image (docker pull mostlygeek:cuda)
 ./version.sh                           # report installed versions
-# (vLLM image only needed if/when the parked NVFP4 path is revived)
+# (vLLM image needed for the NVFP4+MTP path — see "RESOLVED: NVFP4 + MTP via vLLM")
 ```
 
 `version.sh` reports the host llama-swap version and the llama.cpp build inside the image (the web UI shows neither). Example output:
@@ -279,7 +279,48 @@ llama.cpp:  version: 9468 (354ebac8c)
 llama-swap: version: 223 (...)
 ```
 
-## Parked: NVFP4 + MTP via vLLM
+## RESOLVED: NVFP4 + MTP via vLLM — WORKS (2026-06-11)
+
+**The parked conclusion below was wrong on every count.** `Qwen3.6-27B-Text-NVFP4-MTP` now runs on this host under **vLLM v0.22.0, TP=2, with MTP** — ~56 tok/s single-stream and ~355 tok/s peak batched. No driver/kernel change was needed; the GDN "deadlock" simply no longer reproduces.
+
+### What actually blocked it (not GDN, not the interconnect, not the host)
+- **The GDN/FLA deadlock is gone.** vLLM sails past `qwen_gdn_linear_attn.py:228 Using Triton/FLA GDN prefill kernel` and loads normally. Whatever combination (vLLM build / transformers / driver state) caused the 2026-06-08 hang, it no longer occurs on the same driver `610.43.02` + CachyOS kernel.
+- **TP shards GDN fine.** The 27B GDN model splits across both cards (~9.3 GiB/worker). The earlier "15 GiB/worker → not sharding" reading was actually a *correctly-sharded* 30 GiB model — see next point.
+- **The real culprits were model size + incomplete downloads.** `raydelossantos/Qwen3.6-27B-GPTQ-Int4` keeps attention in bf16 (only MLPs are 4-bit) → **30.2 GB**, which TP=2 shards to ~15 GB/worker → OOM on 16 GB cards. It was also only ⅓ downloaded. The NVFP4 checkpoint was likewise a partial download. Neither was ever loadable — the OOM/"hang" were artifacts of that, not a vLLM limitation.
+
+### Working recipe
+Model lives fully downloaded at `/home/jim/models/vllm-direct/Qwen3.6-27B-Text-NVFP4-MTP` (19 GB; pulled with **`aria2c -x16 -c`** because the HF link is flaky — `hf_transfer` is fast but restarts on stall, plain `hf` resumes but crawls).
+
+```
+docker run -d --name qwen36-nvfp4 --runtime nvidia --ipc=host \
+  -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=0,1 \
+  -e NCCL_P2P_DISABLE=1 -e NCCL_SHM_DISABLE=0 -e NCCL_IB_DISABLE=1 -e NCCL_CUMEM_ENABLE=0 \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  -p 8000:8000 -v /home/jim/models:/models \
+  vllm/vllm-openai:v0.22.0 \
+  --model /models/vllm-direct/Qwen3.6-27B-Text-NVFP4-MTP --served-model-name qwen36nvfp4 \
+  --tensor-parallel-size 2 --max-model-len 32768 --max-num-seqs 1 \
+  --gpu-memory-utilization 0.85 --disable-custom-all-reduce --trust-remote-code \
+  --language-model-only \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":1}' \
+  --port 8000
+```
+Gotchas that cost time: **`--language-model-only`** (checkpoint is declared multimodal; without it vLLM dies looking for `preprocessor_config.json`); the MTP method is **`qwen3_next_mtp`**, not `"mtp"`; util **0.85** clears the 5070's ~1.3 GB desktop on vLLM's startup memory pre-check (0.90 fails it by ~20 MiB). NVFP4 auto-detects (`Detected ModelOpt NVFP4 checkpoint`).
+
+### Benchmarks (single-stream 27B, measured 2026-06-11)
+| Config | tok/s |
+|---|---|
+| vLLM TP=2, no MTP | 37.8 |
+| llama.cpp `-sm tensor`, no MTP | ~39.5 |
+| **vLLM TP=2 + MTP** (`qwen3_next_mtp`, ~80% draft accept) | **~55–57** |
+| **llama.cpp + MTP** | **54–64** |
+| vLLM TP=2 **batched**, 32 concurrent (no MTP) | ~137 sustained / **355 peak** |
+
+**Verdict:** for **single-stream** decode, vLLM and llama.cpp are **tied** (~56 vs 54–64) — mismatched cards + no NVLink/P2P cap TP, exactly as predicted. vLLM wins decisively only under **concurrency** (~3.6–9× single-stream). For one-request-at-a-time use, llama.cpp stays the simplest tuned path; reach for vLLM when serving concurrent load.
+
+---
+
+<details><summary>Historical investigation (2026-06-08, now superseded — kept for the record)</summary>
 
 Goal: run `sakamakismile/Qwen3.6-27B-Text-NVFP4-MTP` (modelopt NVFP4 + multi-token-prediction) to get native Blackwell FP4 + MTP speculative decoding. **The model does not initialize in vLLM 0.22.0 on this machine — but the reason is the *model*, not the hardware.**
 
@@ -325,6 +366,8 @@ docker run --rm --runtime nvidia --ipc=host \
 
 Once it serves on `:8000`, wiring it into llama-swap is just a `cmd:`/`cmdStop:` model entry wrapping the above (publish `${PORT}:8000`).
 
+</details>
+
 ## Upgrade options & expected gains
 
 Analysis of what would actually move the needle, given the current bottleneck is the **5060 Ti** (448 GB/s, ~half the 5070 Ti's bandwidth) and the **single CPU-wired slot**.
@@ -337,7 +380,7 @@ Baseline today: **`Qwen3.6-27B-Q5-MTP`, llama.cpp layer-split, ~36–47 tok/s, 1
 - **Done (2026-06-10):** moved the 5060 Ti off its chipset **PCIe 4.0 x1** slot onto **`M2A_CPU`** (CPU-direct) via an **M.2 → PCIe x4 riser**; relocated the slow NVMe to a PCIe x1 slot via an x1→M.2 adapter. Full detail in the TP section's [stability writeup](#tp-stability-5060-ti-x1-slot-drop-fixed-by-an-m2-riser).
 - **Delivered:** the 5060 Ti's link went **x1 → Gen4 x4** (~7.9 GB/s) and onto CPU lanes (`NODE → PHB`), and **holds under load** — `-sm tensor` no longer drops the card. Also ended the chipset/DMI bus-fragility.
 - **Measured decode:** **`-sm tensor` + MTP = 54–64 tok/s** (vs ~35 layer+MTP) — ~1.5–1.8×, bigger than predicted because the x1 link's *latency*, not bandwidth, was the real TP throttle.
-- **Notes:** riser cable quality was the stability variable (a good shielded one held full Gen4); needs a powered adapter; the 5070 Ti kept full x16 (manual-confirmed, no bifurcation). Did **not** help vLLM (that's blocked by the FLA-GDN issue, not the interconnect).
+- **Notes:** riser cable quality was the stability variable (a good shielded one held full Gen4); needs a powered adapter; the 5070 Ti kept full x16 (manual-confirmed, no bifurcation). (At the time, thought not to help vLLM — but vLLM TP+MTP now works regardless; see "RESOLVED: NVFP4 + MTP via vLLM".)
 
 ### Z890 board with two CPU-wired x8/x8 slots
 - **Unlocks:** both GPUs on CPU lanes → P2P → vLLM tensor-parallel works → **NVFP4 + MTP across both cards** becomes possible. Also removes the 5060 Ti from the chipset/DMI link (ends the "fallen off the bus" fragility). *(Note: the M.2-riser option above already gets the 5060 Ti onto CPU lanes for far less — the Z890's extra value is the full x8 width and a clean second slot, not a unique capability.)*
