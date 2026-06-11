@@ -119,9 +119,9 @@ models:
       --spec-ngram-mod-n-min 0
       --spec-ngram-mod-n-max 16
       -b 2048
-      # -c: filling VRAM toward ~90% (~185k -> 89/96) OOMs under a real prefill load;
+      # -c: filling VRAM toward ~90% (~175k -> 89/96) OOMs under a real prefill load;
       # backed off to a conservative 80000 for headroom (2026-06-11).
-      -c 80000
+      -c 175000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
