@@ -15,11 +15,17 @@ healthCheckTimeout: 300
 
 models:
   qwen3.6-35B-Q4:
+    # MoE + MTP (2026-06-12): ~119 -> ~168 t/s decode (+41%) via the MTP-enabled GGUF
+    # (Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf from unsloth/Qwen3.6-35B-A3B-MTP-GGUF) plus
+    # --spec-type draft-mtp. Fastest model here, ~3x the vLLM 27B; n-max 2 per Unsloth
+    # docs. The non-MTP GGUF (...-Q4_K_M.gguf) is kept on disk as fallback.
     cmd: |
       docker run --rm --name q35b --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /home/jim/models:/models
       --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
-      -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+      -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
       --fit on
       --fit-ctx 128000
       --fit-target 256
