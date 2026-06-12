@@ -179,11 +179,23 @@ layer, so the fast card waits on the slow one — a decode-speed cap no split fi
 split/`-c` tuning in "Balancing & context" below is about VRAM balance and stable
 context, not speed.
 
-### TP stability: 5060 Ti x1-slot drop, fixed by an M.2 riser
+### TP stability: 5060 Ti bus drops (x1-slot drop fixed by riser; GPU-hang recurred 2026-06-12)
 
-✅ **RESOLVED (2026-06-10).** TP is now stable *and* the fastest 27B config:
-**54–64 tok/s** decode (prompt-dependent), no bus drops, both GPUs at **93–96%
-utilisation** under load. What follows is the saga, kept as a record.
+⚠️ **PARTIALLY resolved — recurred 2026-06-12 as a *different* failure.** The M.2 riser
+fixed the **x1-link de-train** (the 2026-06-10 saga below): that specific drop is gone.
+But under **sustained heavy load** (a long back-to-back benchmarking session) the 5060 Ti
+dropped again — and this time the **PCIe link stayed healthy at Gen4 x4** while the **GPU
+itself hung out of driver control** (`Unable to determine the device handle for GPU0:
+0000:01:00.0: Unknown Error` — an Xid-class fault). So it's a **driver/GPU hang, not a
+link fault** the riser can address. Prime suspect: the **beta driver `610.43.02`** (the
+same one behind the vLLM-GDN weirdness) — a **stable-branch driver is the likely real fix**.
+
+> 🛑 **Do NOT recover it with `echo 1 > /sys/bus/pci/devices/0000:01:00.0/remove` + rescan.**
+> On a *wedged* GPU that **panics the whole machine** (confirmed 2026-06-12). **Just reboot** —
+> that always recovers both cards cleanly.
+
+For reference, the original x1-drop config still benchmarks at **54–64 tok/s** decode, both
+GPUs ~93–96% util. The 2026-06-10 writeup below stands for that original failure the riser cured.
 
 **The problem (2026-06-09).** With the 5060 Ti in its chipset **PCIe 4.0 x1** slot,
 running `Qwen3.6-27B-Q5-MTP-TP` dropped it off the bus almost immediately — where
