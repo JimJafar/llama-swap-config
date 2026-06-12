@@ -274,6 +274,42 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop g31mtp
+  # MoE + MTP (2026-06-12): ~140 -> ~184 t/s decode (+30%) — the fastest model here.
+  # gemma-4-26B-A4B MoE (qat UD-Q4_K_XL) + its separate MTP draft, both from
+  # unsloth/gemma-4-26B-A4B-it-qat-GGUF. ggml-org image (gemma MTP needs the newer
+  # build). NO --swa-full -- gemma's iSWA would OOM with it (dual KV cache). The dense
+  # gemma-4-31B-Q4-MTP above stays for higher coding quality; this is the speed pick.
+  gemma-4-26B-MoE-MTP:
+    cmd: |
+      docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      -m /models/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      -md /models/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -ngl 99
+      -ngld 99
+      -c 65536
+      --tensor-split 1,1
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 64
+      --min-p 0.0
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g26moe
   bge-m3:
     unlisted: true
     cmd: |
