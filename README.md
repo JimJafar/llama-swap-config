@@ -408,3 +408,27 @@ Baseline today: **`Qwen3.6-27B-Q5-MTP`, llama.cpp layer-split, ~36–47 tok/s, 1
 4. **Z890 x8/x8 board (5060 Ti kept)** — unlocks the most vLLM *capability* (NVFP4+MTP) but delivers little *speed* (~1.3–1.7×), and the riser already gets the 5060 Ti onto CPU lanes for a fraction of the cost. Good only if the goal is the NVFP4/vLLM path + full x8 width.
 
 Bottom line: **the riser was the win** — cheapest unlock, fixed the TP stability problem, and `-sm tensor`+MTP now runs 54–64 tok/s. Beyond that, the 5060 Ti remains the ceiling, so for more raw speed upgrade the *GPU* before the board.
+
+## TODO / parked experiments
+
+### DiffusionGemma 26B-A4B (block-diffusion LM) — try after the stable-driver migration
+[`unsloth/diffusiongemma-26B-A4B-it-GGUF`](https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF) — a **discrete diffusion** LM (not autoregressive) on the gemma-4-26B-A4B MoE. Generates by denoising whole blocks of tokens in parallel; can be very fast (card claims >1100 tok/s on an H100). Genuinely different architecture, worth a look.
+
+**Why it's parked (not just another GGUF entry):**
+- **Needs an unmerged PR built from source** — the standard `llama-cli`/`llama-server` *cannot* run it. No off-the-shelf image (mostlygeek/ggml-org) has it; it's a ~15–20 min CUDA compile of PR #24423.
+- **CLI only — no `/v1` server**, so it **can't be a llama-swap entry** (llama-swap proxies HTTP). It'd be a standalone interactive run, not part of the swappable fleet.
+- **No MTP / spec-decoding** (incompatible with block-diffusion — it already generates blocks in parallel).
+- **Do it AFTER moving off beta driver `610.43.02`** — it's a custom build + a live GPU run, exactly what we shouldn't do on the driver that hung the box twice on 2026-06-12.
+
+**Build + run (when ready):**
+```bash
+# build the diffusion runner from the PR branch
+gh pr checkout 24423
+cmake -B build -DGGML_CUDA=ON
+cmake --build build -j --config Release --target llama-diffusion-cli
+
+# run (CLI / conversation mode; --diffusion-visual shows the canvas denoising live)
+./build/bin/llama-diffusion-cli \
+  -m diffusiongemma-26B-A4B-it-Q8_0.gguf -ngl 99 -cnv -n 2048 --diffusion-visual
+```
+Diffusion-specific flags: `--diffusion-eb auto` (Entropy-Bound sampler, default), `--diffusion-eb-max-steps 48`, `--diffusion-eb-t-max/-t-min` (0.8→0.4), `--diffusion-kv-cache auto` (prompt-prefix caching). GGUF not yet downloaded.
