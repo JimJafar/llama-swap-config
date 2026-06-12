@@ -432,3 +432,18 @@ cmake --build build -j --config Release --target llama-diffusion-cli
   -m diffusiongemma-26B-A4B-it-Q8_0.gguf -ngl 99 -cnv -n 2048 --diffusion-visual
 ```
 Diffusion-specific flags: `--diffusion-eb auto` (Entropy-Bound sampler, default), `--diffusion-eb-max-steps 48`, `--diffusion-eb-t-max/-t-min` (0.8→0.4), `--diffusion-kv-cache auto` (prompt-prefix caching). GGUF not yet downloaded.
+
+**⚠️ Fit problem on 2×16 GB — test this FIRST, before any context tuning.** The runner is **single-GPU as documented** (`-ngl 99` → one GPU; no `--tensor-split`/multi-GPU in the docs), but the *smallest* quant already exceeds a 16 GB card:
+
+| quant | file | ~VRAM |
+|---|---|---|
+| Q4_K_M | 16.8 GB | ~18 GB (smallest — already > 16 GB card) |
+| Q5_K_M | 19.1 GB | |
+| Q6_K | 22.7 GB | |
+| Q8_0 | 26.9 GB | ~28 GB |
+
+So as documented it **does not fit here** — and "use the spare VRAM for context" fails because the model can't pool both cards. **The make-or-break question:** `llama-diffusion-cli` is built on llama.cpp's ggml backend, so **`--tensor-split` may work despite being undocumented**.
+- **If tensor-split works** → Q6_K/Q8_0 spans both cards (32 GB), leaving room for a large prompt-context KV cache → *then* push toward the 256K max.
+- **If it doesn't** → only `-ngl ~88` partial CPU offload fits on one card (slow — defeats diffusion's speed point).
+
+Test order post-driver: (1) build PR #24423; (2) `Q6_K` + `--tensor-split 1,1`, does it load across both cards? (3) only if yes, raise context. Don't bother with context tuning until step 2 passes.
