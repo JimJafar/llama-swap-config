@@ -54,11 +54,11 @@ models:
       # --spec-type draft-mtp
       # --spec-draft-n-max 3
 
-      --spec-type draft-mtp,ngram-mod
+      # ngram-mod removed 2026-06-12: silently off at -np 1, and benchmarked as a
+      # no-op vs draft-mtp alone on fresh generation (only helps repetitive/echoing
+      # tasks, which would need -np 2 and halve context). draft-mtp gives +50%.
+      --spec-type draft-mtp
       --spec-draft-n-max 3
-      --spec-ngram-mod-n-match 40
-      --spec-ngram-mod-n-min 0
-      --spec-ngram-mod-n-max 16
 
       # --spec-draft-p-min 0.75
       # --cache-type-k-draft q5_0
@@ -118,11 +118,11 @@ models:
       --flash-attn on
       -sm tensor
       --fit off
-      --spec-type draft-mtp,ngram-mod
+      # ngram-mod removed 2026-06-12: silently off at -np 1, and benchmarked as a
+      # no-op vs draft-mtp alone on fresh generation (only helps repetitive/echoing
+      # tasks, which would need -np 2 and halve context). draft-mtp gives +50%.
+      --spec-type draft-mtp
       --spec-draft-n-max 3
-      --spec-ngram-mod-n-match 40
-      --spec-ngram-mod-n-min 0
-      --spec-ngram-mod-n-max 16
       -b 2048
       # -c: filling VRAM toward ~90% (~175k -> 89/96) OOMs under a real prefill load;
       # backed off to a conservative 80000 for headroom (2026-06-11).
