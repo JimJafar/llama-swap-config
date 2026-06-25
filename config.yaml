@@ -400,10 +400,14 @@ models:
   # THE CONSTRAINT HERE IS SYSTEM RAM, NOT VRAM. ~16-24 GB of the model lives in RAM, so:
   #  - PUSH the GPUs to ~90% like any other config (LOW --n-cpu-moe). That's safe AND it
   #    shrinks the RAM footprint -- both goals align. VRAM % was never the problem.
-  #  - KEEP mmap (NO --no-mmap on 32 GB!). --no-mmap hard-allocated ~24 GB of experts ->
-  #    93% RAM -> swap-thrash -> system lag -> 5060 fell off the PCIe bus (driver
-  #    watchdog). mmap keeps RAM-resident experts as EVICTABLE page cache (shows as
-  #    buff/cache, not "used") so RAM can't thrash. Watch `free -h` SWAP, not VRAM %.
+  #  - KEEP mmap (NO --no-mmap on 32 GB at 128K!). --no-mmap hard-allocated ~24 GB of
+  #    experts -> 93% RAM -> swap-thrash -> system lag -> 5060 fell off the PCIe bus
+  #    (driver watchdog). mmap keeps RAM-resident experts as EVICTABLE page cache (shows
+  #    as buff/cache, not "used") so RAM can't thrash. Watch `free -h` SWAP, not VRAM %.
+  #    --no-mmap MEASURED (2026-06-25, 32K profile): prefill 277 -> 600 t/s (+117%!),
+  #    gen 41 -> 42 (mmap page-faults crush PREFILL on the offloaded experts; decode is
+  #    cache-warm so ~unaffected). Stable at 80% RAM on the 32K profile (n22, ~15 GB in
+  #    RAM). NOT safe at 128K (n28, ~19 GB -> ~90% RAM = crash zone) until 64 GB.
   #  - Knobs: --n-cpu-moe = RAM<->GPU/SPEED (lower = more on GPU = faster + less RAM,
   #    until a card OOMs); --tensor-split A,B = balance (A = CUDA0 = 5070 Ti; LOWER A ->
   #    shift load to 5060). Both profiles PREFILL-VALIDATED with a 31K NIAH prompt (see
@@ -414,8 +418,10 @@ models:
   #    Fix = LOWER -ub (512->256 ~halves it) + raise --n-cpu-moe for room. NOT a split
   #    problem -- no ratio fits if total VRAM is short. (-ub 256 also drops prefill
   #    277->147 t/s; a FULL 128K prefill is then ~15 min, fine for typical prompts.)
-  # 64 GB RAM would buy HEADROOM (escape the 94% knife-edge) + higher quants + the faster
-  # --no-mmap path -- NOT raw speed; IQ3_XXS already does ~37 t/s here.
+  # 64 GB RAM: the real win is --no-mmap AT 128K = ~2x prefill (a full 128K ingest drops
+  # from ~15 min to ~4) on long-context work, the one thing 32 GB can't safely give.
+  # NOT higher quants -- those TANK speed (Q4_K_S ~62% in RAM -> ~18-22 t/s vs IQ3's 37,
+  # for a marginal KLD gain per unsloth's curve). IQ3_XXS is the sweet spot; keep it.
   qwen3.5-122B-IQ3-MTP:
     cmd: |
       docker run --rm --name q122b --runtime nvidia --cap-add SYS_ADMIN
