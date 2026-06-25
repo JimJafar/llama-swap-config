@@ -290,7 +290,7 @@ models:
       --spec-draft-n-max 2
       -ngl 99
       -ngld 99
-      -c 65536
+      -c 256000
       --tensor-split 1,1
       -np 1
       -fa on
@@ -310,6 +310,144 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop g26moe
+  # Qwen3-Coder-Next (added 2026-06-24): MoE RAM-OFFLOAD experiment. 80B total / 3B
+  # active (512 experts, 10 + 1 shared), hybrid Gated DeltaNet + Gated Attention, 48
+  # layers, 256K native ctx. unsloth Q4_K_M (~50 GB) does NOT fit 32 GB VRAM, so
+  # experts spill to system RAM via --n-cpu-moe. THIS is the offload test: only 3B
+  # active => ~1.7 GB/tok read from RAM at Q4, so the DDR5-bandwidth ceiling is ~30 t/s
+  # (faster as more experts stay on GPU). If RAM gets tight, drop to Q3_K_M (38.3 GB,
+  # ~10 GB to RAM) -- comfortable fallback. Q5_K_M (56.8 GB) needs the 64 GB RAM upgrade.
+  #
+  # NEW ARCH -- needs a llama.cpp build with the Qwen3-Next (Gated DeltaNet) operators,
+  # so this uses the ggml-org image (newer than mostlygeek b9544), NOT the TP image.
+  # If it dies with "unknown architecture" / unknown op, bump the tag to the newest
+  # ghcr.io/ggml-org/llama.cpp:server-cuda13-bNNNN. No NCCL in this image => NO -sm
+  # tensor; that's fine, this run is layer-split + CPU expert offload, not TP.
+  #
+  # --n-cpu-moe N = experts of the top N (of 48) layers live in RAM. Start 24, then
+  # LOWER until VRAM is ~90% full without OOM -- lower = more experts on GPU = faster
+  # AND less RAM used (both goals align); raise it if you OOM. ~24 puts ~21 GB in RAM.
+  # TWO KNOBS: A in --tensor-split = CUDA0 = 5070 Ti (raise A -> shift load 5060->5070,
+  # for BALANCE -- aim both cards ~80%, under the ~85% prefill-OOM line); --n-cpu-moe =
+  # RAM<->GPU (lower -> more experts on GPU = SPEED). Rebalance first, then chase speed.
+  # --threads 12 was key (loader defaulted to 4/20 -> CPU expert math was throttled).
+  #
+  # TUNED 2026-06-25 (final): --n-cpu-moe 26, --tensor-split 2.75,1, -c 131072 ->
+  # 5060 80% / 5070 82%, ~30-35 t/s gen, ~300 t/s prefill, FULL 128K context. (First
+  # boot was ~3 t/s before balancing + threads. For MAX SPEED over context, the 32K
+  # variant --n-cpu-moe 24 + --tensor-split 2.5,1 gave ~40 t/s.) 128K is cheap here:
+  # only the 12 Gated-Attention layers carry KV (2 KV-heads x 256, q8_0) ~= ~1.5 GB even
+  # at 128K; the 36 DeltaNet layers add ~nothing and -ub 512 bounds prefill buffers.
+  # CAVEAT: a near-full 128K prompt takes ~7 min to prefill at 300 t/s (one-time per
+  # context; KV is cached between turns).
+  #
+  # MTP TESTED 2026-06-24: this GGUF has NO MTP layers (unsloth stripped the nextn
+  # tensors) -> draft-mtp fails at load ("model doesn't contain MTP layers"). Off the
+  # table unless a quant/repo ships them, or a separate -md draft GGUF appears.
+  # mmap kept ON (no --no-mmap/--mlock): ~20 GB of experts in page cache; mlock'ing that
+  # much can trip the container memlock ulimit (--no-mmap untried, minor perf). -fa on;
+  # if it errors on the Gated Attention layers, try -fa auto or off. Filename: point -m
+  # at the real file; if unsloth split it into shards, use -00001-of-0000N.gguf first.
+  qwen3-coder-next-Q4:
+    cmd: |
+      docker run --rm --name qcodernext --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      -m /models/Qwen3-Coder-Next-Q4_K_M.gguf
+      -ngl 99
+      --n-cpu-moe 26
+      --threads 12
+      -c 131072
+      --tensor-split 2.75,1
+      # MTP: NOT in this GGUF -- unsloth's Qwen3-Coder-Next-Q4_K_M was converted
+      # without the MTP layers ("model doesn't contain MTP layers", 2026-06-24). Would
+      # need a quant/repo that includes the nextn tensors, or a separate -md draft GGUF.
+      # --spec-type draft-mtp
+      # --spec-draft-n-max 2
+      -np 1
+      -fa on
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      # repo recommends temp 1.0; lower to ~0.7 for more deterministic code.
+      --temp 1.0
+      --top-p 0.95
+      --top-k 40
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop qcodernext
+  # Qwen3.5-122B-A10B (added 2026-06-25): the BIG sibling of qwen3-coder-next -- SAME
+  # hybrid arch (Gated DeltaNet + Gated Attention + MoE, 64 layers, MTP-trained), so
+  # the same ggml-org b9570 image and the same tuning playbook apply. 122B total / 10B
+  # active, 256 experts (8 routed + 1 shared). unsloth UD-IQ3_XXS (44.7 GB single file)
+  # = the sweet-spot quant per unsloth's KLD benchmarks (Q2->Q3 is the big quality jump;
+  # Q3->Q4 marginal). Fits CURRENT 32 GB RAM: ~26 GB GPU + ~19 GB RAM, ~13 GB headroom.
+  #
+  # TWO VALIDATED PROFILES (2026-06-25), both 6/6 needle recall, GPU mem rock-solid:
+  #  * 128K ctx (ACTIVE below): --n-cpu-moe 28, --tensor-split 2.5,1, -ub 256, -c 131072
+  #    -> 5060 86% / 5070 78%, 147 t/s prefill, 37 t/s gen.
+  #  * 32K ctx (max speed): --n-cpu-moe 22, --tensor-split 2,1, -ub 512, -c 32768
+  #    -> 5060 94% / 5070 92%, 277 t/s prefill, 41 t/s gen.
+  # MTP WORKS on this GGUF (unlike Coder-Next, the nextn tensors were KEPT) -- --spec-type
+  # draft-mtp below is what makes these speeds (plain 10B-active offload would be ~15-22).
+  # Sampling below is a generic Qwen3 non-thinking default; adjust per the model card.
+  #
+  # THE CONSTRAINT HERE IS SYSTEM RAM, NOT VRAM. ~16-24 GB of the model lives in RAM, so:
+  #  - PUSH the GPUs to ~90% like any other config (LOW --n-cpu-moe). That's safe AND it
+  #    shrinks the RAM footprint -- both goals align. VRAM % was never the problem.
+  #  - KEEP mmap (NO --no-mmap on 32 GB!). --no-mmap hard-allocated ~24 GB of experts ->
+  #    93% RAM -> swap-thrash -> system lag -> 5060 fell off the PCIe bus (driver
+  #    watchdog). mmap keeps RAM-resident experts as EVICTABLE page cache (shows as
+  #    buff/cache, not "used") so RAM can't thrash. Watch `free -h` SWAP, not VRAM %.
+  #  - Knobs: --n-cpu-moe = RAM<->GPU/SPEED (lower = more on GPU = faster + less RAM,
+  #    until a card OOMs); --tensor-split A,B = balance (A = CUDA0 = 5070 Ti; LOWER A ->
+  #    shift load to 5060). Both profiles PREFILL-VALIDATED with a 31K NIAH prompt (see
+  #    test-30K.md): GPU mem rock-solid, 6/6 recall at all depths incl. the middle.
+  #  - GOING TO 128K: the killer isn't KV/weights, it's the PROMPT-PROCESSING COMPUTE
+  #    BUFFER -- it grows with context and must fit on device 0 (5070), failing with
+  #    "graph_reserve: failed to allocate compute pp buffers" even when weights/KV fit.
+  #    Fix = LOWER -ub (512->256 ~halves it) + raise --n-cpu-moe for room. NOT a split
+  #    problem -- no ratio fits if total VRAM is short. (-ub 256 also drops prefill
+  #    277->147 t/s; a FULL 128K prefill is then ~15 min, fine for typical prompts.)
+  # 64 GB RAM would buy HEADROOM (escape the 94% knife-edge) + higher quants + the faster
+  # --no-mmap path -- NOT raw speed; IQ3_XXS already does ~37 t/s here.
+  qwen3.5-122B-IQ3-MTP:
+    cmd: |
+      docker run --rm --name q122b --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /home/jim/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      -m /models/Qwen3.5-122B-A10B-UD-IQ3_XXS.gguf
+      -ngl 99
+      --n-cpu-moe 28
+      --threads 12
+      -c 131072
+      --tensor-split 2.5,1
+      # MTP: TESTING -- Jim reports this is an MTP model. If load fails with "model
+      # doesn't contain MTP layers" (like Coder-Next), comment these two out + drop
+      # --n-cpu-moe back toward 30. If it loads, big win (10B active is slow, MTP helps).
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -np 1
+      -fa on
+      -b 2048
+      -ub 256
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.7
+      --top-p 0.8
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q122b
   bge-m3:
     unlisted: true
     cmd: |
