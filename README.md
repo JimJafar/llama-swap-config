@@ -13,6 +13,28 @@ PSU: 1050 W.
 
 The 5060 Ti is **chipset-attached** rather than on CPU-direct lanes; it shares DMI bandwidth with the rest of the PCH and is more sensitive to power and signal-integrity margin than the 5070 Ti.
 
+### Expansion ceiling: 2 GPUs here, but a 3rd (48 GB) is possible on the right board
+
+**This board is capped at 2 GPUs / 32 GB.** It exposes only **one CPU-direct M.2 slot** (used by the 5060 Ti's riser), and its **chipset PCIe slots cannot hold a GPU under inference load** — a card there falls off the bus (see [the bus-drop writeup](#resolved-second-gpu-falling-off-the-bus-under-inference-load)). Rule learned the hard way: **on this hardware a GPU only stays up on a CPU-direct lane.**
+
+**A 3rd GPU (→ 48 GB) needs a board that exposes two free CPU-direct lanes.** The CPU itself (Arrow Lake, LGA1851) always has the lanes — 16 (graphics, bifurcates x8/x4/x4) + 4 (PCIe 5.0 M.2) + 4 (PCIe 4.0 M.2) — it's the *board* that must break out a second CPU M.2. Verified option: **ASUS ROG Strix Z890-F Gaming WiFi**, which wires **two** CPU-direct M.2 slots:
+
+| Card | Slot | CPU-direct? | Width |
+|------|------|-------------|-------|
+| 5070 Ti | primary x16 | ✅ | PCIe 5.0 x16 |
+| 5060 Ti | M.2_1 (via adapter) | ✅ | PCIe 5.0 x4 |
+| 5060 Ti | M.2_2 (via adapter) | ✅ | PCIe 4.0 x4 |
+
+All three CPU-direct — **no chipset, no DMI contention** (the exact thing that drops cards here), no bifurcation, and the 5070 keeps its full x16.
+
+**Cheaper alternative — bifurcation riser, no new board:** if a board's BIOS supports **x8/x4/x4** on the primary slot, that one x16 slot becomes three CPU-direct GPUs (5070 @ x8 + 2× 5060 @ x4). The current board does **not** expose this, which is why the path requires a new board.
+
+**Reality check:**
+- **Capacity win, not speed.** 3-way TP runs at 5060-Ti-class throughput (the slowest card gates the per-layer all-reduce). The prize is *fitting* models: Q8 dense 27B @128K fully on-GPU, or the 122B with much less RAM offload — not higher tok/s.
+- The x4 legs may negotiate down to **PCIe 4.0** over adapter/riser cables — fine for decode, a mild prefill drag.
+- Cost ≈ **£750** (board + 2nd 5060 Ti + adapters). Three GPUs need open-frame mounting; the 1050 W PSU has headroom for 300 W + 2×180 W.
+- **Decision (2026-06-26): parked.** Not worth £750 for +16 GB of *capacity* until a specific model is genuinely bottlenecked on VRAM capacity (not speed). Good to know the path exists.
+
 ## Resolved: second GPU falling off the bus under inference load
 
 **Root cause (confirmed June 2026): the 5060 Ti was improperly seated.** Reseating it resolved the failure. Everything below was diagnosed *before* that was found; the `pcie_aspm=off` kernel parameter cut the failure rate by reducing PCIe link-power transitions, but it was masking a mechanical fault, not curing one.

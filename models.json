@@ -1,0 +1,73 @@
+{
+  "providers": {
+    "llama-swap (local)": {
+      "baseUrl": "http://marvin.akita-betelgeuse.ts.net:8033/v1",
+      "api": "openai-completions",
+      "apiKey": "llama-swap",
+      "models": [
+        {
+          "id": "gemma-4-26B-MoE-MTP",
+          "input": ["text", "image"],
+          "contextWindow": 256000
+        },
+        {
+          "id": "gemma-4-31B-Q4-MTP",
+          "input": ["text", "image"],
+          "contextWindow": 75536,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        },
+        {
+          "id": "gemma-4-31B-Q4-QAT",
+          "input": ["text", "image"],
+          "contextWindow": 98304,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        },
+        {
+          "id": "qwen3-coder-next-Q4",
+          "input": ["text"],
+          "contextWindow": 131072
+        },
+        {
+          "id": "qwen3.5-122B-IQ3-MTP",
+          "input": ["text"],
+          "contextWindow": 131072
+        },
+        {
+          "id": "Qwen3.6-27B-Q5-MTP",
+          "input": ["text", "image"],
+          "contextWindow": 142000,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        },
+        {
+          "id": "Qwen3.6-27B-Q5-MTP-TP",
+          "input": ["text", "image"],
+          "contextWindow": 175000,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        },
+        {
+          "id": "qwen3.6-35B-Q4",
+          "input": ["text", "image"],
+          "contextWindow": 128000,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        },
+        {
+          "id": "qwen36-nvfp4",
+          "input": ["text"],
+          "contextWindow": 32768,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        }
+      ]
+    }
+  },
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  }
+}

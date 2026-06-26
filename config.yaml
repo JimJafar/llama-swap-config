@@ -158,6 +158,23 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop q27mtptp
+  # --- Qwen3.6-27B Q6 @ 128K: ABANDONED 2026-06-26 (do not retry on 32 GB VRAM) ---
+  # Goal was "highest quant @ 128K @ >=30 t/s". Q6 is a dead end on 2x16 GB; the win
+  # over Q5_K_XL is sub-0.1% KLD (flat tail) and not worth the VRAM fight. Evidence:
+  #  - MTP lives in unsloth/Qwen3.6-27B-MTP-GGUF (NOT the plain ...-GGUF repo, which
+  #    ships nextn-stripped, block_count=64). Match the -MTP-GGUF naming like the 35B.
+  #  - Plain Q6_K (22.9 GB, MTP) + `-sm tensor` -> GGML_ASSERT SPLIT_AXIS_UNKNOWN crash.
+  #    Tensor-split only works on UD quants (they keep key tensors at higher precision);
+  #    plain quants can't be tensor-split for this hybrid (qwen35) arch.
+  #  - Plain Q6_K + LAYER-split @128K: loads (split 1.3,1, -ub 256) but VRAM is at the
+  #    ceiling (dev0 ~670 MiB free). Decode looked OK (~31 t/s on an empty prompt) but
+  #    PREFILL THRASHES as KV grows: 63 -> 32 -> 21 t/s over the first 6 K tokens
+  #    (super-linear), so a 31 K prompt ~25 min. Unusable for long context.
+  #  - UD-Q6_K_XL (26 GB) tensor-splits fine but overflows the 128K fit (~0.6 GB over).
+  # Net: Q5_K_XL (UD, tensor-split, 147 t/s prefill / 39.5 t/s decode, headroom, MTP)
+  # is the ceiling on 32 GB. Only MORE VRAM unlocks Q6@128K; the 64 GB RAM does NOT
+  # (dense weights are VRAM-bound, not RAM-offloadable). Q6's only viable niche here
+  # would be REDUCED context (~48-64 K) via UD-Q6_K_XL tensor-split -- not pursued.
   # --- vLLM NVFP4 + MTP (WORKS as of 2026-06-11; see README "RESOLVED: NVFP4 + MTP via vLLM") ---
   # ~56 tok/s single-stream (TP=2 + qwen3_next_mtp MTP, ~80% draft accept), ~355 tok/s peak
   # batched. Tied with llama.cpp single-stream; wins only under concurrency. Uses the
