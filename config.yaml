@@ -246,10 +246,13 @@ models:
   #
   # Why a DIFFERENT image (ggml-org, not mostlygeek): the MTP draft is a separate
   # `gemma4-assistant` model (arch new in llama.cpp >= 9570). mostlygeek's newest is
-  # only b9544, so it can't load the assistant yet. The ggml-org image is b9570 and
-  # its entrypoint is already /app/llama-server. Caveat: it ships NO NCCL, so it
+  # only b9544, so it can't load the assistant yet. The ggml-org image is pinned to
+  # b9692 (bumped from b9570 on 2026-06-26 to pick up recurrent/SWA prompt-cache
+  # checkpoint fixes -- PRs #19747/#19849/#19877/#19924/#20087 -- that affect the Qwen
+  # Gated-DeltaNet hybrids; see the qwen3-coder-next / qwen3.5-122B entries).
+  # Its entrypoint is already /app/llama-server. Caveat: it ships NO NCCL, so it
   # CANNOT do `-sm tensor` TP -- that path stays on the mostlygeek image. When
-  # mostlygeek ships >= b9570, this can move back to it (keeps NCCL + MTP in one image).
+  # mostlygeek ships >= b9692, this can move back to it (keeps NCCL + MTP in one image).
   #
   # MTP wiring: -md <assistant> + --spec-type draft-mtp; the assistant has
   # nextn_predict_layers=4 so --spec-draft-n-max 4. -c trimmed to 65536 and
@@ -260,7 +263,7 @@ models:
     cmd: |
       docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /home/jim/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
       -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
       --spec-type draft-mtp
@@ -300,7 +303,7 @@ models:
     cmd: |
       docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /home/jim/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
       -m /models/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
       --spec-type draft-mtp
@@ -369,7 +372,7 @@ models:
     cmd: |
       docker run --rm --name qcodernext --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /home/jim/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
       -m /models/Qwen3-Coder-Next-Q4_K_M.gguf
       -ngl 99
       --n-cpu-moe 26
@@ -443,7 +446,7 @@ models:
     cmd: |
       docker run --rm --name q122b --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /home/jim/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9570
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
       -m /models/Qwen3.5-122B-A10B-UD-IQ3_XXS.gguf
       -ngl 99
       --n-cpu-moe 28
