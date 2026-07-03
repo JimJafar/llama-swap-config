@@ -184,18 +184,26 @@ models:
   # (dense weights are VRAM-bound, not RAM-offloadable). Q6's only viable niche here
   # would be REDUCED context (~48-64 K) via UD-Q6_K_XL tensor-split -- not pursued.
   # --- vLLM NVFP4 + MTP (WORKS as of 2026-06-11; see README "RESOLVED: NVFP4 + MTP via vLLM") ---
-  # ~56 tok/s single-stream (TP=2 + qwen3_next_mtp MTP, ~80% draft accept), ~355 tok/s peak
-  # batched. Tied with llama.cpp single-stream; wins only under concurrency. Uses the
-  # vllm/vllm-openai image (NOT mostlygeek) and the local 19 GB model at vllm-direct/.
+  # RE-BENCHMARKED 2026-07-03 on the Z890 (both cards CPU-attached Gen5 x8, riser gone):
+  # single-stream 55->60 tok/s (MTP), and batched PEAK 355->462 tok/s at 32 concurrent
+  # (separate config: --max-num-seqs 32, no MTP) -- the Gen5 interconnect helps batched
+  # most, since batched all-reduce payloads are large/bandwidth-bound. Single-stream now
+  # marginally beats the llama.cpp -sm tensor TP entry (47-59); vLLM still only wins
+  # DECISIVELY under concurrency. For a batched serving profile, clone this with
+  # --max-num-seqs 32 and drop --speculative-config (MTP + heavy batching don't combine).
+  # Uses the vllm/vllm-openai image (NOT mostlygeek) and the local 19 GB model at vllm-direct/.
   # Gotchas baked in: --language-model-only (checkpoint is declared multimodal), the MTP
   # method is "qwen3_next_mtp" (not "mtp"), util 0.85 clears the 5070 desktop on vLLM's
-  # startup memory pre-check. Slow start (~180s) -> relies on healthCheckTimeout (top).
+  # startup memory pre-check. Slow start (~130s) -> relies on healthCheckTimeout (top).
+  # DEVICE ENV: MUST use integer indices, NOT UUIDs -- vLLM v0.22.0's model-inspection
+  # subprocess crashes (exit 1, "architecture failed to be inspected") on UUID-format
+  # CUDA_VISIBLE_DEVICES. That's fine here: vLLM TP=2 is SYMMETRIC (each card holds half
+  # of every layer), so unlike the llama.cpp -sm tensor entry it carries no tuned split
+  # that depends on WHICH card is device0. (On Z890 device0 = 5070 Ti; moot for TP.)
   qwen36-nvfp4:
     cmd: |
       docker run --rm --name qwen36nvfp4 --runtime nvidia --ipc=host
-      # Pinned by UUID (5060 Ti first) since 2026-07-03: the Z890 board swapped the PCI
-      # order, so PCI_BUS_ID + 0,1 would flip device0/1 vs the tuned layout.
-      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=0,1
       -e NCCL_P2P_DISABLE=1 -e NCCL_SHM_DISABLE=0 -e NCCL_IB_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e VLLM_NO_USAGE_STATS=1
       -p ${PORT}:8000 -v /mnt/shared/models:/models
@@ -213,101 +221,9 @@ models:
       --host 0.0.0.0
       --port 8000
     cmdStop: docker stop qwen36nvfp4
-  gemma-4-31B-Q4-QAT:
-    # Tuned 2026-06-08: ~25 -> ~31 tok/s decode (measured, empty-context).
-    # Key change vs the old `--fit` config: bias layers onto the fast 5070 Ti
-    # (--tensor-split 2,1) instead of capacity-balancing onto the slow 5060 Ti,
-    # and drop the 156K context (which over-allocated KV and crowded the 5070).
-    # Measured split: 5070 ~14.5G / 5060 ~7.7G. Nudge --tensor-split toward "1,1"
-    # only if you raise -c and the 5070 OOMs; toward "2.3,1" for a bit more speed
-    # if the 5070 has headroom. -ub 512 keeps the 5060's prefill buffer safe.
-    cmd: |
-      docker run --rm --name g31q4 --runtime nvidia --cap-add SYS_ADMIN
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
-      -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
-      -ngl 99
-      -c 98304
-      --tensor-split 1.5,1
-      -np 1
-      -fa on
-      --no-mmap
-      --mlock
-      -b 2048
-      -ub 256
-      -ctk q8_0
-      -ctv q8_0
-      --temp 0.6
-      --top-p 0.95
-      --top-k 64
-      --min-p 0.0
-      --presence-penalty 0.0
-      --repeat-penalty 1.0
-      --reasoning-budget -1
-      --chat-template-kwargs "{\"preserve_thinking\": true}"
-      --timeout 900
-      --no-context-shift
-      --ctx-checkpoints 128
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop g31q4
-  # --- TENSOR-PARALLEL + MTP variant of gemma-4-31B-Q4 (added 2026-07-03) ---
-  # TP alone (first cut, no draft) measured ~10 t/s SLOWER than the layer-split MTP
-  # entry -- the gap was the missing draft, not TP. The rolling mostlygeek :cuda tag
-  # hit b9859 on 2026-07-03 (>= the b9692 needed for the gemma MTP assistant), so
-  # this entry now stacks BOTH: NCCL TP + draft-mtp in one image. Previous known-good
-  # image kept as :cuda-b9592 (retagged locally) -- pin entries back to it if b9859
-  # regresses anything (the Qwen TP entry also rides this rolling tag).
-  # Same TP recipe as Qwen3.6-27B-Q5-MTP-TP: NCCL 2.30.4 preload (bundled 2.25.1 has
-  # the broken sm_120 kernel launch), --ipc=host for SHM transport, --fit off, device
-  # order pinned by UUID (device0 = 5060 Ti, device1 = 5070 Ti which holds the
-  # desktop). --tensor-split only BALANCES in TP (raise 1st num if the 5070 fills
-  # first). -c trimmed 98304 -> 65536 like the layer-split MTP entry to leave draft
-  # room; if the 5070 OOMs, pin the draft to the 5060 with `-devd CUDA0` (device0 =
-  # 5060 Ti under OUR pin -- the old MTP entry's "-devd CUDA1" note assumed the
-  # ggml-org default order). If load crashes with GGML_ASSERT SPLIT_AXIS_UNKNOWN,
-  # this arch can't tensor-split; fall back to gemma-4-31B-Q4-MTP.
-  gemma-4-31B-Q4-MTP-TP:
-    cmd: |
-      docker run --rm --name g31mtptp --runtime nvidia --cap-add SYS_ADMIN
-      --ipc=host
-      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
-      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
-      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
-      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
-      -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
-      -md /models/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
-      --spec-type draft-mtp
-      --spec-draft-n-max 4
-      -ngl 99
-      -ngld 99
-      -fa on
-      -sm tensor
-      --fit off
-      --main-gpu 0
-      --tensor-split 1.01,1
-      -c 65536
-      -np 1
-      -b 2048
-      -ub 512
-      -ctk q8_0
-      -ctv q8_0
-      --temp 0.6
-      --top-p 0.95
-      --top-k 64
-      --min-p 0.0
-      --presence-penalty 0.0
-      --repeat-penalty 1.0
-      --reasoning-budget -1
-      --chat-template-kwargs "{\"preserve_thinking\": true}"
-      --timeout 900
-      --no-context-shift
-      --ctx-checkpoints 128
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop g31mtptp
+  # NB: no `-sm tensor` gemma entry -- gemma TP+MTP crashes (GGML_ASSERT, tensor-split
+  # can't allocate the MTP graph on gemma's shared-KV arch) and TP-no-MTP (35.8 t/s) loses
+  # to layer-split+MTP below (64.3 t/s). Use gemma-4-31B-Q4-MTP; don't re-add a TP variant.
   # gemma-4-31B-Q4-QAT + MTP assistant (added 2026-06-09). Measured ~30 -> ~50 tok/s
   # decode (~1.68x), ~61-63% draft acceptance.
   #
