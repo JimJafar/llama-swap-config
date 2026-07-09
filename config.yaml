@@ -90,6 +90,7 @@ models:
       --min-p 0.0
       --presence-penalty 0.0
       --repeat-penalty 1.0
+      --reasoning-format none
       --reasoning-budget -1
       --chat-template-kwargs "{\"preserve_thinking\": true}"
       --timeout 900
@@ -134,6 +135,7 @@ models:
       --min-p 0.05
       --presence-penalty 0.0
       --repeat-penalty 1.0
+      --reasoning-format none
       --reasoning-budget -1
       --chat-template-kwargs "{\"preserve_thinking\": true}"
       --timeout 900
@@ -213,6 +215,7 @@ models:
       --min-p 0.05
       --presence-penalty 0.0
       --repeat-penalty 1.0
+      --reasoning-format none
       --reasoning-budget -1
       --chat-template-kwargs "{\"preserve_thinking\": true}"
       --timeout 900
@@ -423,6 +426,7 @@ models:
       --min-p 0.0
       --presence-penalty 0.0
       --repeat-penalty 1.0
+      --reasoning-format none
       --timeout 900
       --host 0.0.0.0
       --port 8080
