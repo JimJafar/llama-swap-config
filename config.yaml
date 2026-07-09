@@ -13,7 +13,50 @@
 # default for the vLLM entry (qwen36-nvfp4), which takes ~180s to load + capture graphs.
 healthCheckTimeout: 300
 
+# Qwen 3.5/3.6 jinja template fix
+#
+# The fixed template comes from here: https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates/blob/main/README.md
+#
+# All Qwen 3.5 and 3.6 variants should have `--jinja --chat-template-file /models/qwen_35_36_chat_template.jinja`
+# (llama.cpp). The .jinja file must live in the MOUNTED models dir (/mnt/shared/models on the host,
+# which is bind-mounted to /models in every container) -- a host-side repo path is invisible inside
+# the container. For the vLLM entry the flag is `--chat-template <path>` instead (no --jinja).
+#
+# The Thinking Toggle
+#
+# You can control the model reasoning behavior. Insert `<|think_on|>` or `<|think_off|>` anywhere in your system or user prompt. The template intercepts the tag, removes it from the final context so the model never sees it, and flips the reasoning mode instantly.
+#
+# **Fast answer, no reasoning:**
+# ```text
+# System: You are a coding assistant. <|think_off|>
+# User: What's 2+2?
+# ```
+#
+# **Deep reasoning:**
+# ```text
+# System: You are a coding assistant. <|think_on|>
+# User: Implement a red-black tree in Rust.
+# ```
+# *(The tag syntax uses Qwen's control token delimiters to guarantee it will never collide with legitimate text or file paths, unlike earlier community templates that used `/think`)*
+#
+# Token Saving (Stripping past thoughts):
+#
+# By default, this template **preserves** all past `<think>` blocks in the chat history. This prevents the model from suffering "amnesia stalls" during complex agentic loops, and it mathematically guarantees a 100% Prefix KV Cache hit rate on local inference engines.
+#
+# If you are running constrained hardware and need to save context tokens, you can explicitly disable this feature in your engine's template kwargs to automatically strip past thoughts:
+# ```json
+# {
+#   "preserve_thinking": false
+# }
+# ```
+# *(Note: Setting this to false will reduce your KV Cache hit rate during multi-turn chats because the prompt string will dynamically mutate).*
+
 models:
+
+  # ########### #
+  # QWEN MODELS #
+  # ########### #
+
   qwen3.6-35B-Q4:
     # MoE + MTP (2026-06-12): ~119 -> ~168 t/s decode (+41%) via the MTP-enabled GGUF
     # (Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf from unsloth/Qwen3.6-35B-A3B-MTP-GGUF) plus
@@ -24,6 +67,10 @@ models:
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_35_36_chat_template.jinja
+
       --spec-type draft-mtp
       --spec-draft-n-max 2
       --fit on
@@ -55,10 +102,12 @@ models:
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/Qwen3.6-27B-UD-Q5_K_XL.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_35_36_chat_template.jinja
+
       -ngl 99
       --flash-attn on
-      # --spec-type draft-mtp
-      # --spec-draft-n-max 3
 
       # ngram-mod removed 2026-06-12: silently off at -np 1, and benchmarked as a
       # no-op vs draft-mtp alone on fresh generation (only helps repetitive/echoing
@@ -128,6 +177,10 @@ models:
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/Qwen3.6-27B-UD-Q5_K_XL.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_35_36_chat_template.jinja
+
       -ngl 99
       --flash-attn on
       -sm tensor
@@ -209,6 +262,10 @@ models:
       -p ${PORT}:8000 -v /mnt/shared/models:/models
       vllm/vllm-openai:v0.22.0
       --model /models/vllm-direct/Qwen3.6-27B-Text-NVFP4-MTP
+
+      # fixed chat template (vLLM uses --chat-template, NOT llama.cpp's --jinja/--chat-template-file)
+      --chat-template /models/qwen_35_36_chat_template.jinja
+
       --served-model-name qwen36-nvfp4
       --tensor-parallel-size 2
       --max-model-len 32768
@@ -221,98 +278,6 @@ models:
       --host 0.0.0.0
       --port 8000
     cmdStop: docker stop qwen36nvfp4
-  # NB: no `-sm tensor` gemma entry -- gemma TP+MTP crashes (GGML_ASSERT, tensor-split
-  # can't allocate the MTP graph on gemma's shared-KV arch) and TP-no-MTP (35.8 t/s) loses
-  # to layer-split+MTP below (64.3 t/s). Use gemma-4-31B-Q4-MTP; don't re-add a TP variant.
-  # gemma-4-31B-Q4-QAT + MTP assistant (added 2026-06-09). Measured ~30 -> ~50 tok/s
-  # decode (~1.68x), ~61-63% draft acceptance.
-  #
-  # Why a DIFFERENT image (ggml-org, not mostlygeek): the MTP draft is a separate
-  # `gemma4-assistant` model (arch new in llama.cpp >= 9570). mostlygeek's newest is
-  # only b9544, so it can't load the assistant yet. The ggml-org image is pinned to
-  # b9692 (bumped from b9570 on 2026-06-26 to pick up recurrent/SWA prompt-cache
-  # checkpoint fixes -- PRs #19747/#19849/#19877/#19924/#20087 -- that affect the Qwen
-  # Gated-DeltaNet hybrids; see the qwen3-coder-next / qwen3.5-122B entries).
-  # Its entrypoint is already /app/llama-server. Caveat: it ships NO NCCL, so it
-  # CANNOT do `-sm tensor` TP -- that path stays on the mostlygeek image. When
-  # mostlygeek ships >= b9692, this can move back to it (keeps NCCL + MTP in one image).
-  #
-  # MTP wiring: -md <assistant> + --spec-type draft-mtp; the assistant has
-  # nextn_predict_layers=4 so --spec-draft-n-max 4. -c trimmed to 65536 and
-  # --tensor-split eased to 1.3,1 to leave the 5070 Ti room for the draft alongside
-  # the main model. If the 5070 OOMs, lower -c further or pin the draft to the 5060
-  # with `-devd CUDA1`.
-  gemma-4-31B-Q4-MTP:
-    cmd: |
-      docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
-      -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
-      -md /models/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
-      --spec-type draft-mtp
-      --spec-draft-n-max 4
-      -ngl 99
-      -ngld 99
-      -c 75536
-      --tensor-split 1.3,1
-      -np 1
-      -fa on
-      --no-mmap
-      --mlock
-      -b 2048
-      -ub 256
-      -ctk q8_0
-      -ctv q8_0
-      --temp 0.6
-      --top-p 0.95
-      --top-k 64
-      --min-p 0.0
-      --presence-penalty 0.0
-      --repeat-penalty 1.0
-      --reasoning-budget -1
-      --chat-template-kwargs "{\"preserve_thinking\": true}"
-      --timeout 900
-      --no-context-shift
-      --ctx-checkpoints 128
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop g31mtp
-  # MoE + MTP (2026-06-12): ~140 -> ~184 t/s decode (+30%) — the fastest model here.
-  # gemma-4-26B-A4B MoE (qat UD-Q4_K_XL) + its separate MTP draft, both from
-  # unsloth/gemma-4-26B-A4B-it-qat-GGUF. ggml-org image (gemma MTP needs the newer
-  # build). NO --swa-full -- gemma's iSWA would OOM with it (dual KV cache). The dense
-  # gemma-4-31B-Q4-MTP above stays for higher coding quality; this is the speed pick.
-  gemma-4-26B-MoE-MTP:
-    cmd: |
-      docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
-      -m /models/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
-      -md /models/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
-      --spec-type draft-mtp
-      --spec-draft-n-max 2
-      -ngl 99
-      -ngld 99
-      -c 256000
-      --tensor-split 1,1
-      -np 1
-      -fa on
-      --no-mmap
-      --mlock
-      -b 2048
-      -ub 512
-      -ctk q8_0
-      -ctv q8_0
-      --temp 0.6
-      --top-p 0.95
-      --top-k 64
-      --min-p 0.0
-      --timeout 900
-      --no-context-shift
-      --ctx-checkpoints 128
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop g26moe
   # Qwen3-Coder-Next (added 2026-06-24): MoE RAM-OFFLOAD experiment. 80B total / 3B
   # active (512 experts, 10 + 1 shared), hybrid Gated DeltaNet + Gated Attention, 48
   # layers, 256K native ctx. unsloth Q4_K_M (~50 GB) does NOT fit 32 GB VRAM, so
@@ -384,6 +349,7 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop qcodernext
+
   # Qwen3.5-122B-A10B (added 2026-06-25): the BIG sibling of qwen3-coder-next -- SAME
   # hybrid arch (Gated DeltaNet + Gated Attention + MoE, 64 layers, MTP-trained), so
   # the same ggml-org b9570 image and the same tuning playbook apply. 122B total / 10B
@@ -431,6 +397,10 @@ models:
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
       -m /models/Qwen3.5-122B-A10B-UD-IQ3_XXS.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_35_36_chat_template.jinja
+
       -ngl 99
       --n-cpu-moe 28
       --threads 12
@@ -457,6 +427,112 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop q122b
+
+
+  # ############ #
+  # GEMMA MODELS #
+  # ############ #
+
+
+  # NB: no `-sm tensor` gemma entry -- gemma TP+MTP crashes (GGML_ASSERT, tensor-split
+  # can't allocate the MTP graph on gemma's shared-KV arch) and TP-no-MTP (35.8 t/s) loses
+  # to layer-split+MTP below (64.3 t/s). Use gemma-4-31B-Q4-MTP; don't re-add a TP variant.
+  # gemma-4-31B-Q4-QAT + MTP assistant (added 2026-06-09). Measured ~30 -> ~50 tok/s
+  # decode (~1.68x), ~61-63% draft acceptance.
+  #
+  # Why a DIFFERENT image (ggml-org, not mostlygeek): the MTP draft is a separate
+  # `gemma4-assistant` model (arch new in llama.cpp >= 9570). mostlygeek's newest is
+  # only b9544, so it can't load the assistant yet. The ggml-org image is pinned to
+  # b9692 (bumped from b9570 on 2026-06-26 to pick up recurrent/SWA prompt-cache
+  # checkpoint fixes -- PRs #19747/#19849/#19877/#19924/#20087 -- that affect the Qwen
+  # Gated-DeltaNet hybrids; see the qwen3-coder-next / qwen3.5-122B entries).
+  # Its entrypoint is already /app/llama-server. Caveat: it ships NO NCCL, so it
+  # CANNOT do `-sm tensor` TP -- that path stays on the mostlygeek image. When
+  # mostlygeek ships >= b9692, this can move back to it (keeps NCCL + MTP in one image).
+  #
+  # MTP wiring: -md <assistant> + --spec-type draft-mtp; the assistant has
+  # nextn_predict_layers=4 so --spec-draft-n-max 4. -c trimmed to 65536 and
+  # --tensor-split eased to 1.3,1 to leave the 5070 Ti room for the draft alongside
+  # the main model. If the 5070 OOMs, lower -c further or pin the draft to the 5060
+  # with `-devd CUDA1`.
+  gemma-4-31B-Q4-MTP:
+    cmd: |
+      docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
+      -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+      -md /models/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 4
+      -ngl 99
+      -ngld 99
+      -c 75536
+      --tensor-split 1.3,1
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 256
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 64
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g31mtp
+
+  # MoE + MTP (2026-06-12): ~140 -> ~184 t/s decode (+30%) — the fastest model here.
+  # gemma-4-26B-A4B MoE (qat UD-Q4_K_XL) + its separate MTP draft, both from
+  # unsloth/gemma-4-26B-A4B-it-qat-GGUF. ggml-org image (gemma MTP needs the newer
+  # build). NO --swa-full -- gemma's iSWA would OOM with it (dual KV cache). The dense
+  # gemma-4-31B-Q4-MTP above stays for higher coding quality; this is the speed pick.
+  gemma-4-26B-MoE-MTP:
+    cmd: |
+      docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
+      -m /models/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      -md /models/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -ngl 99
+      -ngld 99
+      -c 256000
+      --tensor-split 1,1
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 64
+      --min-p 0.0
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g26moe
+
+
+  # ################ #
+  # EMBEDDING MODELS #
+  # ################ #
+
   bge-m3:
     unlisted: true
     cmd: |
@@ -474,3 +550,42 @@ models:
       --embeddings
       --no-mmap
     cmdStop: docker stop bge
+
+  # Qwen3-Embedding-4B (added 2026-07-04): upgrade over bge-m3 for CODE retrieval.
+  # Qwen3-Embedding is explicitly trained for code + 100 languages, tops MTEB, and is
+  # vLLM-native (same ecosystem as the LLMs). 4B = quality/VRAM sweet spot on a 16GB
+  # card (~8GB BF16, loads on one GPU, no TP). Use for indexing a codebase for RAG.
+  # bge-m3 kept above for general multilingual dense+sparse; this one for code search.
+  #
+  # HARD-WON SETUP NOTES (2026-07-04):
+  #  - `--runner pooling` is the embedding flag in vLLM 0.22 (the old `--task embed`
+  #    is gone). It auto-configures LAST-token pooling for Qwen3-Embedding.
+  #  - `--enforce-eager`: skip torch.compile/cudagraph capture. Right call for a
+  #    swap-in embedder (fast start > peak throughput; a single forward pass barely
+  #    benefits from cudagraphs). Without it, first start compiles for many minutes.
+  #  - LOCAL PATH + HF_HUB_OFFLINE=1: point at the pre-downloaded dir, NOT the HF id.
+  #    With the HF id, vLLM makes unauthenticated HF Hub calls at load that get
+  #    rate-limited and HANG forever (model loads to VRAM then sits at 0% util). The
+  #    model was snapshot_download'd to /mnt/shared/models/Qwen3-Embedding-4B.
+  #  - Pinned to one card (device 0). Embedding needs no TP; llama-swap serves one
+  #    model at a time so it has the GPU to itself. Query the OpenAI /v1/embeddings
+  #    endpoint with model=qwen3-embedding-4b. NB Qwen3-Embedding wants an instruction
+  #    prefix on QUERIES (not documents) for best retrieval -- that's a client concern.
+  qwen3-embedding-4b:
+    unlisted: true
+    cmd: |
+      docker run --rm --name qwen3emb --runtime nvidia --ipc=host
+      -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1
+      -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=0
+      -e VLLM_NO_USAGE_STATS=1
+      -p ${PORT}:8000 -v /mnt/shared/models:/models
+      vllm/vllm-openai:v0.22.0
+      --model /models/Qwen3-Embedding-4B
+      --runner pooling
+      --enforce-eager
+      --served-model-name qwen3-embedding-4b
+      --max-model-len 8192
+      --gpu-memory-utilization 0.60
+      --host 0.0.0.0
+      --port 8000
+    cmdStop: docker stop qwen3emb
