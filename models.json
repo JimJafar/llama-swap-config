@@ -25,14 +25,14 @@
           "thinkingLevelMap": { "off": null }
         },
         {
-          "id": "qwen3-coder-next-Q4",
+          "id": "qwen3.5-122B-IQ3-MTP",
           "input": ["text"],
           "contextWindow": 131072
         },
         {
-          "id": "qwen3.5-122B-IQ3-MTP",
+          "id": "laguna-s-2.1-Q4",
           "input": ["text"],
-          "contextWindow": 131072
+          "contextWindow": 262144
         },
         {
           "id": "Qwen3.6-27B-Q5-MTP",
@@ -49,6 +49,13 @@
           "thinkingLevelMap": { "off": null }
         },
         {
+          "id": "Qwen3.6-27B-Q8-MTP",
+          "input": ["text", "image"],
+          "contextWindow": 262144,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        },
+        {
           "id": "qwen3.6-35B-Q4",
           "input": ["text", "image"],
           "contextWindow": 128000,
@@ -56,9 +63,9 @@
           "thinkingLevelMap": { "off": null }
         },
         {
-          "id": "qwen36-nvfp4",
+          "id": "qwen36-27b-nvfp4",
           "input": ["text"],
-          "contextWindow": 32768,
+          "contextWindow": 100352,
           "reasoning": true,
           "thinkingLevelMap": { "off": null }
         }
