@@ -725,8 +725,8 @@ models:
   # LOAD time pays for it). Combined footprint ~8-9 GB of the ZOTAC's 16 GB.
   #
   # FLOW: POST /v1/audio/transcriptions (model=parakeet-asr) -> transcript
-  #    -> POST /v1/chat/completions   (model=gemma-clean-e4b | gemma-clean-e2b) -> clean text.
-  # llama-swap routes each request by its `model` field; the group keeps all three loaded.
+  #    -> POST /v1/chat/completions   (model=qwen-clean-2b) -> clean text.
+  # llama-swap routes each request by its `model` field; the group keeps both loaded.
   #
   # --- ASR: NVIDIA Parakeet TDT 0.6B (ONNX) via achetronic/parakeet --------------------
   # OpenAI-compatible, English, faster + lower-WER than Whisper. The :latest-cuda image SHIPS
@@ -749,42 +749,23 @@ models:
       ghcr.io/achetronic/parakeet:latest-cuda
     cmdStop: docker stop parakeet
 
-  # --- CLEANUP A: Gemma 4 E4B (4B "effective") QAT Q4 ---------------------------------
-  # Small + natural: strips um/ah, false starts, repetition, mid-sentence self-corrections.
-  # unsloth QAT UD-Q4_K_XL (near-Q8 quality at Q4 size). Shared gemma-4 chat template (same
-  # file the big Gemma entries use). -c 16384 is ample for dictation; temp 0.3 keeps it
-  # faithful (no rewrite drift, no hallucinated additions). A/B vs gemma-clean-e2b below.
-  # !! VERIFY: if the ggml-org b9692 image rejects the E4B/E2B "effective" arch ("unknown
-  #   architecture"), bump to a newer ghcr.io/ggml-org/llama.cpp:server-cuda13 tag.
-  gemma-clean-e4b:
-    cmd: |
-      docker run --rm --name gclean-e4b --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
-      -m /models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
-      --jinja --chat-template-file /models/gemma-4-chat_template.jinja
-      -ngl 99
-      -c 16384
-      -fa on
-      -np 1
-      --temp 0.3
-      --top-p 0.95
-      --top-k 64
-      --min-p 0.0
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop gclean-e4b
+  # (gemma-clean-e4b / gemma-clean-e2b removed 2026-07-26: superseded by qwen-clean-2b,
+  #  which matches their quality ~40x faster. GGUFs deleted from /mnt/shared/models.)
 
-  # --- CLEANUP B: Gemma 4 E2B (2B "effective") QAT Q4 -- the max-speed contender -------
-  gemma-clean-e2b:
+  # --- CLEANUP C: Qwen3.5-2B instruct, thinking OFF -- fast cleanup (added 2026-07-26) --
+  # ~134ms/cleanup at ~90 tok/s; matches gemma-clean-e4b quality on the four dictation
+  # behaviours but ~40x faster. enable_thinking:false is ESSENTIAL -- with thinking on, the
+  # answer goes into reasoning_content and `content` returns empty. Used by baruch-server
+  # (BARUCH_CLEANUP_MODEL). See baruch docs/eval-cleanup.md.
+  qwen-clean-2b:
     cmd: |
-      docker run --rm --name gclean-e2b --runtime nvidia --cap-add SYS_ADMIN
+      docker run --rm --name qclean-2b --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
-      -m /models/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
-      --jinja --chat-template-file /models/gemma-4-chat_template.jinja
+      -m /models/Qwen3.5-2B-UD-Q4_K_XL.gguf
+      --jinja --chat-template-file /models/qwen_35_36_chat_template.jinja
+      --chat-template-kwargs "{\"enable_thinking\": false}"
       -ngl 99
       -c 16384
       -fa on
@@ -795,17 +776,17 @@ models:
       --min-p 0.0
       --host 0.0.0.0
       --port 8080
-    cmdStop: docker stop gclean-e2b
+    cmdStop: docker stop qclean-2b
 
 
 # ############################################################################## #
 # GROUPS                                                                          #
-#   `dictation`: keep the ASR + BOTH cleanup LLMs resident together on the ZOTAC. #
+#   `dictation`: keep the ASR + the cleanup LLM resident together on the ZOTAC.  #
 #     swap:false       -> members coexist; capture <-> cleanup never unloads.     #
 #     exclusive:false  -> does NOT evict your other (ungrouped) models.           #
 #     persistent:false -> NOT auto-loaded on config reload; loads on first        #
 #                         request only, so editing this file launches nothing.    #
-#   COEXISTENCE: all 3 members sit on GPU 0 (ZOTAC). The 3-GPU --fit models        #
+#   COEXISTENCE: both members sit on GPU 0 (ZOTAC). The 3-GPU --fit models         #
 #   (laguna-s-2.1 / qwen3.5-122B / Qwen3.6-27B-Q8) ALSO use GPU 0 -- don't run     #
 #   those concurrently with dictation or GPU 0 will OOM. The 2-GPU entries         #
 #   (vLLM TP + the -sm tensor TP entry, pinned to idx 1,2) coexist with it fine.   #
@@ -817,5 +798,4 @@ groups:
     persistent: false
     members:
       - parakeet-asr
-      - gemma-clean-e4b
-      - gemma-clean-e2b
+      - qwen-clean-2b
