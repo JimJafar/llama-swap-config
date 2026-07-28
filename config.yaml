@@ -434,7 +434,8 @@ models:
     cmd: |
       docker run --rm --name q122b --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
+      # known-good image build: b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/Qwen3.5-122B-A10B-UD-IQ3_XXS.gguf
 
       # fixed chat template
@@ -468,62 +469,31 @@ models:
       --port 8080
     cmdStop: docker stop q122b
 
-  # Laguna-S-2.1 (poolside, added 2026-07-21): 117.6B-total / 8.5B-active MoE (256
-  # experts, 10 routed + 1 shared, per-head gating), 48 layers, mixed sliding-window +
-  # global attention, 8 KV heads (small KV -> cheap long context), 262K native ctx.
-  # Agentic-coding model. SWITCHED 2026-07-24 from poolside Q4_K_M (~71 GB single file) to
-  # unsloth UD-IQ4_XS (~57.6 GB, 3 shards -- i-quant + imatrix + Unsloth Dynamic, ~4.46 bpw
-  # vs Q4_K_M's ~4.89). Smaller weights let --fit keep MORE on GPU (less RAM spill, so decode
-  # should improve); an online report showed this exact quant giving strong results. Still
-  # exceeds 48 GB VRAM -> routed experts spill to RAM; the fork's --fit handles the split.
-  #
-  # !! NEW ARCH ("laguna" / LagunaForCausalLM) -- NOT in mainline llama.cpp (any ggml-org
-  # image fails "unknown architecture: laguna"). Requires POOLSIDE'S FORK, branch laguna
-  # (upstream PR ggml-org/llama.cpp#25165 still in review). We build a local image from it:
-  #   docker build -t llama-laguna:local --build-arg CUDA_DOCKER_ARCH=120 --target server \
-  #     -f .devops/cuda.Dockerfile "https://github.com/poolsideai/llama.cpp.git#laguna"
-  # (CUDA 12.8.1, sm_120/Blackwell). Rebuild to pick up fork updates.
-  #
-  # MEMORY (48 GB VRAM + 62 GB RAM; ~64 GB of the 75 GB is routed experts): DON'T hand-tune
-  # the split. The poolside fork's --fit balances the model across all 3 GPUs and auto-
-  # offloads routed experts to RAM (evictable mmap page cache) while keeping the core
-  # (attention / embeddings / shared expert) on GPU. VALIDATED 2026-07-22: loads ~14.8 GB/card.
-  #  - Mainline idioms (-ngl / --n-cpu-moe / --tensor-split) ABORT the fit ("...already set
-  #    by user, abort") and OOM one card -- do NOT add them.
-  #  - --threads 20 = all cores for CPU expert math; mmap stays on (evictable).
-  # Filename: unsloth ships this quant as 3 shards (Laguna-S-2.1-UD-IQ4_XS-0000{1,2,3}-of-
-  # 00003.gguf, ~57.6 GB total, all in /mnt/shared/models). Point -m at the FIRST shard;
-  # llama.cpp auto-loads the rest from the same directory.
-  laguna-s-2.1-Q4:
+  # Laguna-S-2.1 (poolside): 117.6B-total / 8.5B-active MoE, `laguna` arch, 262K native ctx,
+  # agentic-coding. Quant: unsloth UD-IQ4_XS, 3 shards (~57.6 GB) -- point -m at the FIRST shard,
+  # llama.cpp auto-loads the rest. --fit balances it across the 3 GPUs (~14.8 GB/card) and offloads
+  # routed experts to RAM as evictable mmap; do NOT add -ngl/--n-cpu-moe/--tensor-split (they abort
+  # the fit). --threads 20 = all cores for CPU expert math. known-good image build: b10143 (digest
+  # sha256:88b644c232f36da21405f5d849e2d58d333210e79512e7b3efd8bde7345f64fd); if a future latest
+  # OOMs a card, pin `server-cuda13@sha256:<known-good>` or switch to `-ngl 99 --n-cpu-moe N`.
+  laguna-s-2.1-mainline:
     cmd: |
-      docker run --rm --name laguna --runtime nvidia --cap-add SYS_ADMIN
+      docker run --rm --name laguna-mainline --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server llama-laguna:local
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Laguna-S-2.1-UD-IQ4_XS-00001-of-00003.gguf
 
-      # Unsloth ships a FIXED external chat template (laguna_chat_template.jinja, 227 KB --
-      # native interleaved reasoning + tool-calling). Point --jinja at it rather than the
-      # GGUF's built-in template, matching the Qwen/gemma entries' pattern.
+      # Unsloth's fixed external chat template (same file the fork entry uses).
       --jinja --chat-template-file /models/laguna_chat_template.jinja
 
-      # Let the fork AUTO-FIT across all 3 GPUs (do NOT add -ngl/--n-cpu-moe/--tensor-split
-      # -- they abort the fit).
+      # --fit first (mirrors the fork). If a card OOMs, see the --n-cpu-moe fallback above.
       --fit on
-      # --threads 20 = all Arrow Lake cores; tuned 2026-07-22 -> best PP (CPU expert compute).
       --threads 20
       -fa on
       -ctk q8_0
       -ctv q8_0
       -c 262144
       -ub 768
-      # BENCHMARKED 2026-07-22 (t20/ub768): fits ~14.8 GB/card, PP ~168 t/s (+61% vs t12/ub256's
-      # ~100), Gen ~15 t/s. Gen is RAM-BANDWIDTH-bound on the offloaded experts -- threads/ub
-      # don't move it. 131072 performs IDENTICALLY to 262144 (cheap hybrid KV), so no speed
-      # reason to shrink context -- kept at full 256K.
-      # DFlash speculative decoding was EVALUATED AND DROPPED 2026-07-22: it helped code (~+39%
-      # decode at 16K) but was a net LOSS on prose/long-context comprehension, and it caps
-      # context to ~16-32K. Draft GGUF deleted. (Fork still supports it if ever wanted: -md
-      # <draft> --spec-type draft-dflash --spec-draft-n-max 6, with the draft KV kept fp16.)
       --temp 0.7
       --top-p 0.95
       --min-p 0.0
@@ -533,7 +503,7 @@ models:
       --timeout 900
       --host 0.0.0.0
       --port 8080
-    cmdStop: docker stop laguna
+    cmdStop: docker stop laguna-mainline
 
 
 
@@ -548,15 +518,7 @@ models:
   # gemma-4-31B-Q4-QAT + MTP assistant (added 2026-06-09). Measured ~30 -> ~50 tok/s
   # decode (~1.68x), ~61-63% draft acceptance.
   #
-  # Why a DIFFERENT image (ggml-org, not mostlygeek): the MTP draft is a separate
-  # `gemma4-assistant` model (arch new in llama.cpp >= 9570). mostlygeek's newest is
-  # only b9544, so it can't load the assistant yet. The ggml-org image is pinned to
-  # b9692 (bumped from b9570 on 2026-06-26 to pick up recurrent/SWA prompt-cache
-  # checkpoint fixes -- PRs #19747/#19849/#19877/#19924/#20087 -- that affect the Qwen
-  # Gated-DeltaNet hybrids; see the qwen3-coder-next / qwen3.5-122B entries).
-  # Its entrypoint is already /app/llama-server. Caveat: it ships NO NCCL, so it
-  # CANNOT do `-sm tensor` TP -- that path stays on the mostlygeek image. When
-  # mostlygeek ships >= b9692, this can move back to it (keeps NCCL + MTP in one image).
+  # known-good image build: b9692 (the gemma-4 MTP assistant needs >= b9570).
   #
   # MTP wiring: -md <assistant> + --spec-type draft-mtp; the assistant has
   # nextn_predict_layers=4 so --spec-draft-n-max 4. -c trimmed to 65536 and
@@ -568,7 +530,7 @@ models:
       docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
 
@@ -615,7 +577,7 @@ models:
     cmd: |
       docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
 
@@ -762,7 +724,8 @@ models:
       docker run --rm --name qclean-2b --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b9692
+      # known-good image build: b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/Qwen3.5-2B-UD-Q4_K_XL.gguf
       --jinja --chat-template-file /models/qwen_35_36_chat_template.jinja
       --chat-template-kwargs "{\"enable_thinking\": false}"
@@ -784,8 +747,8 @@ models:
 #   `dictation`: keep the ASR + the cleanup LLM resident together on the ZOTAC.  #
 #     swap:false       -> members coexist; capture <-> cleanup never unloads.     #
 #     exclusive:false  -> does NOT evict your other (ungrouped) models.           #
-#     persistent:false -> NOT auto-loaded on config reload; loads on first        #
-#                         request only, so editing this file launches nothing.    #
+#     persistent:true  -> kept resident once loaded; a big-model load can't evict #
+#                         it (enables coexistence). Loads on 1st request, not boot #
 #   COEXISTENCE: both members sit on GPU 0 (ZOTAC). The 3-GPU --fit models         #
 #   (laguna-s-2.1 / qwen3.5-122B / Qwen3.6-27B-Q8) ALSO use GPU 0 -- don't run     #
 #   those concurrently with dictation or GPU 0 will OOM. The 2-GPU entries         #
@@ -795,7 +758,7 @@ groups:
   "dictation":
     swap: false
     exclusive: false
-    persistent: false
+    persistent: true
     members:
       - parakeet-asr
       - qwen-clean-2b
