@@ -469,6 +469,57 @@ models:
       --port 8080
     cmdStop: docker stop q122b
 
+  # Qwen3.5-9B Q8_0 (added 2026-07-31): the small/FAST member of the qwen35 family. Same
+  # hybrid arch as the 27B/122B (Gated DeltaNet + full attention every 4th layer), 32 dense
+  # layers, 9.5 GB at Q8_0 (near-lossless). Tuned purely for SPEED:
+  #  - SINGLE GPU, pinned by UUID to the 5070 Ti (d64df8cf = PCI idx 1, Gen5 x8, the fastest
+  #    card/link here). Weights + KV + compute buffer land around ~11 GB of its 16 GB, so no
+  #    split, no all-reduce, no cross-card traffic -- the fastest possible shape at this size.
+  #    It also leaves the ZOTAC (idx 0) alone, so this COEXISTS with the `dictation` group.
+  #  - NO MTP. This GGUF ships no nextn tensors (427 tensors, blk.0-31 only), unlike the
+  #    27B/35B -MTP builds -- `--spec-type draft-mtp` would abort at load. Don't add it.
+  #  - Context 32K (native max is 262144). KV is cheap on this arch -- only 8 of the 32
+  #    layers are full-attention (full_attention_interval=4) -- so 32K costs well under 1 GB
+  #    even at f16. f16 KV (no -ctk/-ctv) is DELIBERATE: there's headroom, and it's both
+  #    lossless and a touch faster than q8_0 KV. Raise -c if you need more; there's room.
+  #  - --no-mmap: read the weights straight into VRAM, no page-fault stalls on prefill.
+  #    Deliberately NO --mlock (unlike the MoE entries): with -ngl 99 nothing of substance
+  #    stays in RAM to pin, and this host's RLIMIT_MEMLOCK is too low anyway -- it just
+  #    logs "failed to mlock 2172362752-byte buffer / Cannot allocate memory" and moves on.
+  #  - -b/-ub 2048 for fast prefill; the compute buffer stays small at 32K.
+  qwen3.5-9B-Q8:
+    cmd: |
+      docker run --rm --name q9b --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # known-good image build: b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.5-9B-Q8_0.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_35_36_chat_template.jinja
+
+      -ngl 99
+      -c 32768
+      -fa on
+      -np 1
+      --no-mmap
+      -b 2048
+      -ub 2048
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format none
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q9b
+
   # Laguna-S-2.1 (poolside): 117.6B-total / 8.5B-active MoE, `laguna` arch, 262K native ctx,
   # agentic-coding. Quant: unsloth UD-IQ4_XS, 3 shards (~57.6 GB) -- point -m at the FIRST shard,
   # llama.cpp auto-loads the rest. --fit balances it across the 3 GPUs (~14.8 GB/card) and offloads

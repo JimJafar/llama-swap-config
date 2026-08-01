@@ -30,6 +30,13 @@
           "contextWindow": 131072
         },
         {
+          "id": "qwen3.5-9B-Q8",
+          "input": ["text"],
+          "contextWindow": 32768,
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null }
+        },
+        {
           "id": "laguna-s-2.1-Q4",
           "input": ["text"],
           "contextWindow": 262144
