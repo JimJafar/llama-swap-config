@@ -14,13 +14,13 @@ echo "[stt-warmup] waiting for llama-swap on $E ..."
 until curl -sf "$E/v1/models" >/dev/null 2>&1; do sleep 3; done
 # cleanup LLM (OpenAI chat endpoint)
 curl -s "$E/v1/chat/completions" -H 'Content-Type: application/json' \
-  -d '{"model":"qwen-clean-2b","messages":[{"role":"user","content":"warmup"}],"max_tokens":1}' \
-  >/dev/null 2>&1 && echo "[stt-warmup] qwen-clean-2b loaded"
+	-d '{"model":"qwen-clean-2b","messages":[{"role":"user","content":"warmup"}],"max_tokens":1}' \
+	>/dev/null 2>&1 && echo "[stt-warmup] qwen-clean-2b loaded"
 # ASR (whisper-npu-asr on the NPU): llama-swap routes by the multipart `model` field and
 # starts the model before proxying, so the tiny silent WAV just triggers the load (the
 # transcription result, a Whisper-family silence hallucination, is discarded).
 curl -s "$E/v1/audio/transcriptions" -F 'model=whisper-npu-asr' \
-  -F 'file=@/home/jim/llama-swap/warmup-silence.wav;type=audio/wav' \
-  >/dev/null 2>&1 && echo "[stt-warmup] whisper-npu-asr loaded"
+	-F 'file=@/home/jim/llama-swap/warmup-silence.wav;type=audio/wav' \
+	>/dev/null 2>&1 && echo "[stt-warmup] whisper-npu-asr loaded"
 echo "[stt-warmup] done; idling to stay resurrectable"
 sleep infinity
