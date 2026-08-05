@@ -1,7 +1,7 @@
 {
   "providers": {
-    "llama-swap (local)": {
-      "baseUrl": "http://marvin.akita-betelgeuse.ts.net:8033/v1",
+    "marvin": {
+      "baseUrl": "https://marvin.akita-betelgeuse.ts.net:8033/v1",
       "api": "openai-completions",
       "apiKey": "llama-swap",
       "models": [
@@ -23,6 +23,16 @@
           "contextWindow": 98304,
           "reasoning": true,
           "thinkingLevelMap": { "off": null }
+        },
+        {
+          "id": "deepseek-v4-flash-IQ2",
+          "input": ["text"],
+          "contextWindow": 262144
+        },
+        {
+          "id": "deepseek-v4-flash-IQ2-MTP-131K",
+          "input": ["text"],
+          "contextWindow": 131072
         },
         {
           "id": "qwen3.5-122B-IQ3-MTP",
