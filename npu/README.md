@@ -6,24 +6,46 @@ experiment to exercise the otherwise-idle NPU and evaluate it against Parakeet f
 
 ## Result summary (7 real clips, 3–29 s, LibriSpeech test-clean + JFK, normalized WER)
 
-| Model (int8, OpenVINO IR) | Size | AVG WER | 6 s clip | 30 s clip | 62 s clip |
+### On the NPU (int8, OpenVINO IR, static pipeline)
+
+| Model | Size | AVG WER | 6 s clip | 30 s clip | Load |
 |---|---|---|---|---|---|
-| `whisper-base-int8-ov` (Intel pre-converted) | 81 MB | 0.062 | 0.29 s | 0.53 s | — |
-| `distil-whisper/distil-small.en` (our export) | 247 MB | 0.104 | 0.72 s | 1.10 s | — |
-| `distil-whisper/distil-medium.en` (our export) | 476 MB | **0.050** | 1.51 s | 1.73 s | 5.0 s (12.5× realtime) |
+| **distil-medium.en** (chosen) | 476 MB | **0.050** | 1.51 s | 1.73 s | 0.7 s |
+| whisper-base.en | 81 MB | 0.058 | **0.27 s** | **0.58 s** | 0.6 s |
+| whisper-small.en | 247 MB | 0.060 | 1.31 s | 2.66 s | 1.2 s |
+| distil-small.en | 247 MB | 0.104 | 0.72 s | 1.10 s | 0.7 s |
+| whisper-medium.en | ~1 GB | 0.039 | 3.17 s | 5.91 s | 2.6 s |
 
-All clips transcribe **faster than real-time** on the 13-TOPS NPU. Long audio (>30 s) is
-chunked automatically (sliding window) — verified on a 62.5 s concatenation.
+### On CPU (faster-whisper / CTranslate2 int8 — no NPU backend)
 
-**Takeaways**
+| Model | AVG WER | 6 s clip | 30 s clip | Load |
+|---|---|---|---|---|
+| small.en | 0.062 | 0.8–4.2 s | 3.66 s | 40 s |
+| medium.en | 0.054 | 1.8–9.8 s | 6.73 s | — |
 
-- **distil-medium.en is the quality pick on the NPU** (best WER of the three; closest to
-  Parakeet's ~1.4% LibriSpeech test-clean figure). It even nailed the JFK quote that
-  distil-small dropped a phrase from.
-- **distil-small.en is not worth it here**: WER was *no better* than whisper-base and it is
-  ~3× slower (its encoder is whisper-small's, bigger than base's).
-- **whisper-base is the speed pick** (~0.25 s/clip, 60× realtime) if quality can slip.
-- Silent audio makes Whisper-family models hallucinate short text (e.g. `"You're not going
+All NPU options transcribe **faster than real-time**. Long audio (>30 s) is chunked
+automatically (sliding window) — verified on a 62.5 s concatenation.
+
+### The 30-second encoder floor (why short clips cost the same as long ones)
+
+The static pipeline always encodes a full 30 s window, so latency = **fixed encoder cost**
+
++ tiny per-word decode. Sweep on distil-medium: 1 s→1.53 s, 6 s→1.46 s, 20 s→1.66 s,
+29 s→1.72 s, 62 s (2 windows)→4.81 s. whisper-base's floor is only 0.19 s (6-layer
+encoder vs 24). For short dictation clips the encoder floor *is* the latency.
+
+### Published LibriSpeech test-clean WER (for calibration — the 7-clip set is too small)
+
+base ~6 %, small ~3 %, distil-small ~3 %, medium ~2.4 %, distil-medium ~2 %, Parakeet ~1.4 %.
+
+**Decision (2026-08-04, with Jim): distil-medium.en is the primary dictation ASR.** It is
+the only NPU option with Parakeet-level quality (~2 % vs ~1.4 %); the 1.5 s floor is a
+fine dictation wait. whisper-base.en remains exported as a faster fallback (0.27 s, ~6 %).
+Everything else measured worse: whisper-small = distil-medium's latency with worse quality;
+distil-small dropped phrases; whisper-medium's 24-layer decoder is 2–3× slower than
+base's quality tier for no gain; faster-whisper on CPU was the slowest of all.
+
++ Silent audio makes Whisper-family models hallucinate short text (e.g. `"You're not going
   to."`); Parakeet returns empty. Only matters if silence reaches the ASR.
 
 ## Why this was non-trivial (gotchas, all solved)
@@ -87,10 +109,31 @@ Intel's own pre-converted models (`OpenVINO/whisper-base-int8-ov` etc., no patch
 needed) live in `/mnt/shared/models/`; the `OpenVINO/` HF org also publishes
 whisper-medium/large and distil-whisper-large int4/int8 variants.
 
-## Next step (not done — needs Jim's go-ahead)
+## Integration status (DONE 2026-08-04)
 
-Wire the winner into the dictation pipeline: a small FastAPI OpenAI-compatible
-`/v1/audio/transcriptions` server over `WhisperPipeline(..., "NPU")`, registered in
-llama-swap as a `dictation` group member in place of / alongside `parakeet-asr`, and the
-`stt-warmup` script updated to warm the NPU model instead of GPU 0. That fully frees the
-ZOTAC 5060 Ti (GPU 0) so dictation can run during 3-GPU fit models.
+The winner is wired into the production dictation pipeline:
+
++ **`asr_server.py`** (this dir): FastAPI OpenAI-compatible `/v1/audio/transcriptions`
+  over `WhisperPipeline(..., "NPU", static)`; decodes any audio via ffmpeg; serialized
+  `generate`; `/health` for llama-swap's `checkEndpoint`. Requires `LD_LIBRARY_PATH`
+  (set via the llama-swap entry `env`).
++ **config.yaml**: new `whisper-npu-asr` entry (distil-medium.en-npu) as the `dictation`
+  group's ASR member alongside `qwen-clean-2b` (cleanup unchanged). `parakeet-asr` kept
+  as an unlisted GPU fallback (`model=parakeet-asr`; flip back with `BARUCH_ASR_MODEL`).
++ **baruch-server**: `ASR_MODEL = "whisper-npu-asr"` (override: `BARUCH_ASR_MODEL`),
+  `DICTATION_MODELS` updated.
++ **warmup-stt.sh**: warms `whisper-npu-asr` + `qwen-clean-2b` on boot.
++ Verified live: `/v1/dictate` end-to-end (NPU ASR → qwen cleanup → British pass) in
+  ~1.6 s; both group members stay resident (no eviction); ASR uses **no GPU** — dictation
+  ASR now works even while 3-GPU --fit models hold GPU 0.
+
+Performance (measured through llama-swap): cold first call ~8 s (server spawn + pipeline
+load), warm ~1.5 s/clip.
+
+### Pitfall hit during deployment
+
+The edit tool's YAML auto-formatter flattened the `groups:` block indentation
+(`"dictation":` became a root key) — YAML *valid*, but `groups` was null, so llama-swap
+saw no group and the two dictation models evicted each other. Fixed by re-indenting the
+block. **Lesson: after any config edit, validate *semantics* (`python -c "import yaml; ..."`),
+not just syntax.**

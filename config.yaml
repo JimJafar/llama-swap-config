@@ -67,7 +67,6 @@ healthCheckTimeout: 300
 # ############################################################################## #
 
 models:
-
   # ########### #
   # QWEN MODELS #
   # ########### #
@@ -388,7 +387,6 @@ models:
       --port 8000
     cmdStop: docker stop qwen36-27b-nvfp4
 
-
   # Qwen3.5-122B-A10B (added 2026-06-25): the BIG sibling of qwen3-coder-next -- SAME
   # hybrid arch (Gated DeltaNet + Gated Attention + MoE, 64 layers, MTP-trained), so
   # the same ggml-org b9570 image and the same tuning playbook apply. 122B total / 10B
@@ -556,12 +554,9 @@ models:
       --port 8080
     cmdStop: docker stop laguna-mainline
 
-
-
   # ############ #
   # GEMMA MODELS #
   # ############ #
-
 
   # NB: no `-sm tensor` gemma entry -- gemma TP+MTP crashes (GGML_ASSERT, tensor-split
   # can't allocate the MTP graph on gemma's shared-KV arch) and TP-no-MTP (35.8 t/s) loses
@@ -662,6 +657,270 @@ models:
       --port 8080
     cmdStop: docker stop g26moe
 
+  # ############### #
+  # DEEPSEEK MODELS #
+  # ############### #
+
+  # DeepSeek-V4-Flash-0731, unsloth UD-IQ2_M, 3 shards (added 2026-08-01) -- point -m at
+  # the FIRST shard, llama.cpp auto-loads the rest.
+  #
+  # !! DIFFERENT MOUNT !! These shards live on /mnt/models (nvme1n1p5, its own XFS
+  # partition), NOT /mnt/shared/models like every other entry in this file. Hence
+  # `-v /mnt/models:/models`. Do not copy the usual mount line into this entry.
+  #
+  # Arch/size: `deepseek4`, 43 blocks, 256 routed experts + 1 shared, 6 active
+  # (~285B total / ~9B active). Shards are 5 MB (metadata + tokenizer only, 0 tensors),
+  # 46.5 GiB, and ~37 GiB -- ~84 GiB of weights against 47.8 GiB VRAM + 62 GiB RAM.
+  # Per layer: ~1.80 GiB routed experts + ~0.14 GiB attention/shared; embd+output ~0.6 GiB.
+  # So at least ~36 GiB of experts must live in RAM, realistically ~45 GiB once KV and
+  # compute buffers have taken their share of VRAM.
+  #
+  # Quant choice (checked 2026-08-01) -- IQ2_M is the largest one that actually FITS, not the
+  # best one available. Unsloth's ladder, with mean KL-divergence:
+  #     UD-IQ2_M      84.7 GiB   KLD 0.3612   <- this entry; ~43 GiB RAM-side, ~84% of free RAM
+  #     UD-Q2_K_XL    90.2 GiB   KLD 0.2992   ~50 GiB RAM-side = ~97% of free RAM, no slack for
+  #                                           page-cache eviction; also ~13% slower decode (2 more
+  #                                           expert layers on CPU) and forces -c down to ~128K.
+  #     UD-IQ3_XXS    97.1 GiB   KLD 0.1842   DOES NOT FIT. ~95 GiB of usable weight budget exists
+  #                                           before KV; Unsloth themselves spec 110GB+ RAM for it.
+  # The big quality step is IQ3_XXS, and it needs 128 GB of RAM -- that, not a quant bump, is the
+  # upgrade path. Q2_K_XL buys the least KLD per GiB of the three and eats all remaining headroom,
+  # so it was considered and rejected. If IQ2_M proves too degraded, prefer switching models
+  # (qwen3.5-122B-IQ3-MTP, laguna-s-2.1-mainline) over climbing this ladder.
+  #
+  # Placement: --fit on, same as laguna-s-2.1-mainline. It measures the real graph, spreads
+  # non-expert weights + KV across all 3 cards, and offloads routed experts to RAM as
+  # evictable mmap. Do NOT add -ngl / --n-cpu-moe / --tensor-split -- they abort the fit.
+  # -c IS set explicitly so fit only adjusts placement, never context: left unset, fit
+  # would chase the model's 1M native ctx and push nearly every expert into RAM, which
+  # does not fit in 62 GiB and would thrash on NVMe.
+  #
+  # Deliberately NO --mlock and NO --no-mmap (unlike the qwen MoE entries): the ~45 GiB of
+  # RAM-resident experts must stay evictable page cache, or a RAM spike becomes an OOM kill
+  # instead of a re-read. (--mlock would fail on this host's RLIMIT_MEMLOCK anyway.)
+  #
+  # NO MTP / --spec-type draft-mtp: split.tensors.count is 1328 = blk.0-42 + embd/output
+  # only, with no nextn block. Adding it aborts at load, same as qwen3.5-9B-Q8.
+  #
+  # The chat template is EMBEDDED in the GGUF (Unsloth's fixed one), so --jinja on its own
+  # -- no --chat-template-file, unlike the qwen/gemma entries.
+  #
+  # Context: 262144 (256K). Native is 1048576 via YaRN (factor 16 over a 65536 base) and KV
+  # is cheap on this arch -- deepseek4 compresses it per layer (attention.compress_ratios:
+  # 2 layers uncompressed, 21 at 4x, 20 at 128x) on top of MLA (kv_lora 512 + 64 rope) and
+  # a 128-token raw sliding window -- so 256K should cost only a few GiB. It is set
+  # conservatively because `deepseek4` was brand new when this entry was written and its
+  # real KV/compute buffers could not be measured: the 3rd shard was still downloading.
+  # TO RAISE IT, load once and read the actual numbers:
+  #   docker logs dsv4f 2>&1 | grep -E "KV self size|compute buffer|n_ctx|flash_attn|offloaded"
+  # then trade GiB for GiB -- roughly every 1.8 GiB of extra KV pushes one more layer of
+  # experts out of VRAM and into RAM, and RAM is the binding constraint here (~53 GiB free).
+  # 524288 is the realistic next step up; 1048576 is not.
+  #
+  # Levers if it will not load: --fit-target 512 (default is 1024 MiB/device) claws ~1.5 GiB
+  # back into VRAM; -ctk q8_0 -ctv q8_0 halves KV but may be rejected on this arch's
+  # compressed-KV path; -c 131072 as a floor.
+  #
+  # -fa auto rather than the `-fa on` used everywhere else, on purpose: if this arch has no
+  # flash-attention kernel yet, `on` aborts the load whereas `auto` falls back. Check the log
+  # for "flash_attn = 1" and switch to `on` once confirmed.
+  #
+  # Sampling is DeepSeek's own, NOT the 0.6/0.95 the qwen entries use. general.sampling.temp
+  # and top_p in the GGUF are both 1.0; the model card says temp 1.0 with top_p 1.0 in
+  # general, or top_p 0.95 for agentic use -- switch to 0.95 if you drive this with a tool
+  # loop. Note that temp 1.0 / top_p 1.0 / top-k 0 / penalties at their no-op values is not
+  # an arbitrary choice: DeepSeek's own API documents that thinking mode ignores temperature,
+  # top_p, presence_penalty and frequency_penalty outright (accepted for compatibility, no
+  # effect), so this block is what reproduces hosted behaviour locally. That silent-ignore is
+  # an API-side policy, NOT a property of the weights -- llama.cpp knows nothing about
+  # "thinking mode" and WILL apply whatever you put here, so do not set temp 0.6 and assume
+  # the model overrides it. See https://api-docs.deepseek.com/guides/thinking_mode/
+  #
+  # !! ALWAYS SEND A SYSTEM PROMPT !! (measured 2026-08-01, n=6 per condition, fixed seeds)
+  # On a low-signal prompt -- literally "Hi" -- this quant picks its output language at the
+  # first token of the <think> block and gets it wrong often: 3/6 replies came back entirely
+  # in Chinese, one in French. It is sticky, so the whole conversation then continues in it.
+  #   temp 1.0 / top_p 1.0 / top-k 0 (as configured):  3/6 Chinese
+  #   temp 0.6 / top_p 0.95 / top-k 40 (tightened):    2/6 Chinese   <- sampling is NOT the fix
+  #   any system prompt pinning English:               0/6 Chinese   <- this is the fix
+  # Substantive English prompts carry enough signal to mask it, so it looks fine until someone
+  # opens the playground and types "Hi". This is quantization damage to the language prior, not
+  # a template or client bug -- consistent with IQ2_M's 0.3612 KLD (see the quant ladder above),
+  # and another argument for UD-Q2_K_XL if it keeps biting.
+  # There is no server-side lever: --system-prompt-file / -spf no longer exist in this build. The
+  # only ways to guarantee it are (a) the client always sends a system prompt, or (b) extract the
+  # embedded template to a .jinja file and inject a default directive when no system message is
+  # present, then point --chat-template-file at it like the qwen/gemma/laguna entries do.
+  #
+  # Thinking is OFF by default -- the embedded template does `{%- set thinking = false -%}`
+  # and gates <think>/</think> on it (this is NOT the qwen <|think_on|> tag scheme). To turn
+  # it on, add:  --chat-template-kwargs "{\"thinking\": true}"  . --reasoning-format none is
+  # kept so the raw <think> block reaches the client either way, as with the other entries.
+  #
+  # The real depth knob is `reasoning_effort` (template default: none; accepts 'low', 'high',
+  # 'max'), which injects an effort directive into the prompt -- combine as
+  #   --chat-template-kwargs "{\"thinking\": true, \"reasoning_effort\": \"high\"}"
+  # Watch the context budget if you do: DeepSeek documents up to 384K output tokens at high/
+  # max effort, which does not fit the 256K -c set here. Cap it client-side via max_tokens.
+  #
+  # NB: the `dictation` group is persistent: true, so parakeet-asr + qwen-clean-2b are NOT
+  # evicted automatically. Unload them before loading this, or --fit will find the ZOTAC
+  # (CUDA idx 0) short and shrink the GPU share -- pushing yet more experts into RAM.
+  deepseek-v4-flash-IQ2:
+    cmd: |
+      docker run --rm --name dsv4f --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /mnt/models:/models
+      # known-good image build: b10143 (first build here with `deepseek4` arch support)
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
+
+      # chat template ships inside the GGUF -- no --chat-template-file
+      --jinja
+
+      --fit on
+      -c 262144
+      --threads 20
+      -fa auto
+      -np 1
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 0.95
+      --top-k 0
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format none
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop dsv4f
+
+  # MTP evaluation profile (replaced DSpark 2026-08-04). 131K context, same IQ2_M target.
+  # Uses the MTP draft head from ddh0/DeepSeek-V4-Flash-GGUF (Q8_0, ~4.4 GB) instead of
+  # the DSpark drafter (~10 GB). MTP is self-speculative (nextn baked into the assistant),
+  # wired with -md like the gemma entries rather than --model-draft.
+  #
+  # !! IMAGE MUST BE THE PINNED v246 DIGEST (same as the old DSpark entry), NOT :cuda !!
+  #   :cuda is v243 (built 2026-07-26) -- it PREDATES the DeepseekV4 MTP merge
+  #   (llama.cpp#25784, merged 2026-08-02) and aborts the draft load with
+  #   "missing tensor 'blk.0.attn_norm.weight'". The draft GGUF is an mtp-only partial
+  #   model (block 43 + nextn heads, no blk.0-42); v246+ auto-detects that (mtp_only)
+  #   and marks the trunk tensors TENSOR_NOT_REQUIRED.
+  #
+  # PLACEMENT (tuned 2026-08-04): fit CANNOT be used with this draft -- measuring the MTP
+  #   context hits GGML_ASSERT(n_graph_inputs < GGML_SCHED_MAX_SPLIT_INPUTS) (deepseek4
+  #   graph > 30 inputs/split). Explicit placement instead. --cpu-moe (all experts CPU)
+  #   left the GPUs at ~30% and ~7.7 t/s; --n-cpu-moe 33 (first 33 layers' experts CPU,
+  #   layers 33-42 on GPU) with a rebalanced split fills the 5070 Ti + MSI 5060 Ti
+  #   (~70% total) while keeping the ZOTAC (CUDA1, dictation card) light at ~4.5 GB
+  #   so the dictation group can coexist. Device map: CUDA0 = 5070 Ti, CUDA1 = ZOTAC
+  #   5060 Ti, CUDA2 = MSI 5060 Ti (fastest-first enumeration).
+  #
+  # DRAFT DEPTH: --spec-draft-n-max 1, NOT 3. DeepSeek-V4 MTP has a single nextn block
+  #   that drafts sequentially; drafting 3 tokens ahead collapses acceptance (0.38 @
+  #   n-max 3 vs 0.81 @ n-max 1) and the extra draft decodes eat the gains. n-max 1
+  #   measured 16.01 t/s warm vs 14.36 @ n-max 2, 7.68 @ n-max 3 cpu-moe.
+  #
+  # MEASURED 2026-08-04 (warm = 2nd+ request; 1st request is polluted by graph-capture
+  #   warmup, ~30 s regardless of placement/ctx -- do not benchmark first requests):
+  #   this entry 16.01-16.09 t/s @ 0.815 acceptance; DSpark (replaced) was 17.02-17.53
+  #   t/s @ 0.697 -- effectively parity, minus the 10 GB DSpark draft file.
+  deepseek-v4-flash-IQ2-MTP-131K:
+    cmd: |
+      docker run --rm --name dsv4f-mtp --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint llama-server
+      ghcr.io/mostlygeek/llama-swap@sha256:97ecc6acdc6341031d3f4f0cf48514ec735c1ff0c08c29f66628deda3c2dbe3d
+      -m /models/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
+      -md /models/DeepSeek-V4-Flash-MTP-Q8_0.gguf
+      --jinja
+      --fit off
+      --device CUDA0,CUDA1,CUDA2
+      --gpu-layers 44
+      --n-cpu-moe 33
+      --tensor-split 4,0.3,1
+      --spec-type draft-mtp
+      --spec-draft-n-max 1
+      --spec-draft-device CUDA0
+      --gpu-layers-draft 99
+      -c 131072
+      --threads 20
+      -fa auto
+      -np 1
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 1.0
+      --top-k 0
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format none
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop dsv4f-mtp
+
+  # DSpark evaluation profile (re-tuned 2026-08-04 for a FAIR A/B with the MTP entry).
+  # Unlike MTP, this deliberately does NOT reserve the ZOTAC for dictation -- full GPU
+  # memory on all three cards, same as the MTP entry gets. Placement: --n-cpu-moe 31
+  # (experts of layers 31-42 on GPU = 12 expert layers; attention/dense of all 44 layers
+  # on GPU) with split 0.37,4.1,1 (CUDA0 = 5070 Ti carries only 3 target layers + the
+  # 10.14 GiB DSpark draft + output.weight; CUDA1 = ZOTAC carries 33 dense + 5 experts;
+  # CUDA2 = MSI carries 7 experts). Measured GPU: 15.2/13.7/14.9 GiB (~89%).
+  #
+  # The MTP entry's split (4,0.3,1) does NOT transfer here: the DSpark draft is 10.14 GiB
+  # vs MTP's 4.4, so CUDA0 cannot hold 34 dense layers on top of it. --override-tensor
+  # output.weight=CUDA0 is REQUIRED: DSpark reuses the target's output.weight, which must
+  # sit on the same device as the draft (it would otherwise land on CUDA2 per the split).
+  #
+  # MEASURED 2026-08-04 (warm, 131K, same prompt as the MTP benchmark): 16.59 t/s @
+  # 0.589 acceptance / mean len 2.75. MTP entry (n-max 1): 16.01-16.09 t/s @ 0.815 -- a
+  # dead heat; DSpark marginally ahead on this run. Original cpu-moe config measured
+  # 17.02-17.53 t/s on 2026-08-03, so both drafts sit in the same ~16-17.5 band.
+  #
+  # Legacy notes from the original 2026-08-03 eval (kept for reference): runtime is pinned
+  # because DSpark landed after b10228 and was still WIP at merge time. `--fit on` crashes
+  # while measuring the dflash context (GGML_ASSERT n_graph_inputs), same as MTP -- explicit
+  # placement required. No-draft control at this placement was 7.90-9.07 t/s; the 131K
+  # auto-fit control was 13.36 t/s median.
+  deepseek-v4-flash-IQ2-dspark-131K:
+    cmd: |
+      docker run --rm --name dsv4f-dspark --runtime nvidia --cap-add SYS_ADMIN
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint llama-server
+      ghcr.io/mostlygeek/llama-swap@sha256:97ecc6acdc6341031d3f4f0cf48514ec735c1ff0c08c29f66628deda3c2dbe3d
+      -m /models/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
+      --model-draft /models/DeepseekV4-Flash-20260731-DSpark.gguf
+      --jinja
+      --fit off
+      --device CUDA0,CUDA1,CUDA2
+      --gpu-layers 44
+      --n-cpu-moe 31
+      --tensor-split 0.37,4.1,1
+      --override-tensor output.weight=CUDA0
+      --spec-type draft-dspark
+      --spec-draft-n-max 3
+      --spec-draft-device CUDA0
+      --gpu-layers-draft 4
+      -c 131072
+      --threads 20
+      -fa auto
+      -np 1
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 1.0
+      --top-k 0
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format none
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop dsv4f-dspark
 
   # ################ #
   # EMBEDDING MODELS #
@@ -724,37 +983,48 @@ models:
       --port 8000
     cmdStop: docker stop qwen3emb
 
-
   # ############### #
   # DICTATION       #
   # ############### #
-  # Speech-to-text dictation pipeline (added 2026-07-26). Capture (ASR) + cleanup (LLM)
-  # kept RESIDENT TOGETHER via the `dictation` group (swap:false; defined at the bottom
-  # of this file) so a capture -> cleanup round trip never unloads/reloads between steps.
+  # Speech-to-text dictation pipeline (added 2026-07-26; ASR moved to the NPU 2026-08-04).
+  # Capture (ASR on the NPU) + cleanup (LLM on the ZOTAC) kept RESIDENT TOGETHER via the
+  # `dictation` group (swap:false; defined at the bottom of this file) so a capture ->
+  # cleanup round trip never unloads/reloads between steps.
   #
-  # ALL THREE members are pinned to the ZOTAC RTX 5060 Ti by UUID (af5bd53f = the x4
-  # M.2-adapter card / CUDA idx 0), keeping dictation OFF the 5070 Ti + MSI 5060 Ti (the
-  # training / TP cards). Single-GPU inference is insensitive to the x4 link (only weight
-  # LOAD time pays for it). Combined footprint ~8-9 GB of the ZOTAC's 16 GB.
+  # ASR now runs ENTIRELY on the Core Ultra 7 265KF's NPU (13 TOPS) via OpenVINO GenAI's
+  # static WhisperPipeline -- NO GPU, so the ASR leg works even while 3-GPU --fit models
+  # hold GPU 0. Cleanup (qwen-clean-2b) is the only dictation member left on the ZOTAC.
   #
-  # FLOW: POST /v1/audio/transcriptions (model=parakeet-asr) -> transcript
+  # FLOW: POST /v1/audio/transcriptions (model=whisper-npu-asr) -> transcript
   #    -> POST /v1/chat/completions   (model=qwen-clean-2b) -> clean text.
   # llama-swap routes each request by its `model` field; the group keeps both loaded.
   #
-  # --- ASR: NVIDIA Parakeet TDT 0.6B (ONNX) via achetronic/parakeet --------------------
-  # OpenAI-compatible, English, faster + lower-WER than Whisper. The :latest-cuda image SHIPS
-  # the model built in (v3, fp32 ~2.5 GB) -- no model download. Pass `language=en` per request.
-  # Server listens on :5092.
-  # !! VERIFY ON FIRST LAUNCH (untested pre-green-light):
-  #   (1) checkEndpoint: none skips llama-swap's readiness probe (parakeet has no confirmed
-  #       /health); first request blocks until ready. If startup races, point checkEndpoint at
-  #       a real 200 path once known (`curl localhost:${PORT}/`).
-  #   (2) that `--runtime nvidia` + CUDA_VISIBLE_DEVICES=<UUID> actually pins it to the ZOTAC
-  #       (achetronic enables GPU by default; confirm with nvidia-smi it's on idx 0 only).
-  #   FALLBACK if this image misbehaves: faster-whisper (hwdsl2/docker-whisper) exposes the
-  #   same /v1/audio/transcriptions -- a one-line image + model swap.
+  # --- ASR: distil-whisper/distil-medium.en (int8) on the Intel NPU --------------------
+  # Added 2026-08-04 (replaces parakeet-asr as the primary dictation ASR). ~1.5s per clip
+  # (fixed 30s-window encoder floor; still faster than real-time), WER closest to Parakeet
+  # of the NPU options (~2% vs ~1.4% on LibriSpeech test-clean). Server: npu/asr_server.py
+  # (FastAPI, OpenAI /v1/audio/transcriptions) over ov_genai.WhisperPipeline(device="NPU",
+  # static). Export recipe + decoder patcher + full benchmark matrix: npu/README.md.
+  # LD_LIBRARY_PATH is REQUIRED -- the rootless NPU Level Zero driver lives in the venv's
+  # openvino/libs dir (the loader does not self-locate).
+  whisper-npu-asr:
+    checkEndpoint: /health
+    env:
+      - LD_LIBRARY_PATH=/home/jim/npu-env/lib/python3.13/site-packages/openvino/libs
+    cmd: |
+      # SIGTERM on unload is clean (uvicorn shuts down); no cmdStop needed.
+      /home/jim/npu-env/bin/python /home/jim/llama-swap/npu/asr_server.py --port ${PORT}
+      --model-dir /mnt/shared/models/distil-medium.en-npu
+
+  # --- ASR FALLBACK: NVIDIA Parakeet TDT 0.6B (ONNX) via achetronic/parakeet ------------
+  # Kept OUT of the dictation group since 2026-08-04: it needs the ZOTAC (GPU 0), which
+  # defeats the NPU ASR's GPU-freedom. Load on demand (model=parakeet-asr) if the NPU
+  # server is down or its quality gap matters. OpenAI-compatible, English, lowest WER of
+  # all ASR options. The :latest-cuda image SHIPS the model built in (fp32 ~2.5 GB); pass
+  # `language=en` per request. Server listens on :5092.
   parakeet-asr:
     checkEndpoint: none
+    unlisted: true
     cmd: |
       docker run --rm --name parakeet --runtime nvidia
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
@@ -792,17 +1062,17 @@ models:
       --port 8080
     cmdStop: docker stop qclean-2b
 
-
 # ############################################################################## #
 # GROUPS                                                                          #
-#   `dictation`: keep the ASR + the cleanup LLM resident together on the ZOTAC.  #
+#   `dictation`: keep ASR (NPU) + cleanup LLM (ZOTAC) resident together.         #
 #     swap:false       -> members coexist; capture <-> cleanup never unloads.     #
 #     exclusive:false  -> does NOT evict your other (ungrouped) models.           #
 #     persistent:true  -> kept resident once loaded; a big-model load can't evict #
 #                         it (enables coexistence). Loads on 1st request, not boot #
-#   COEXISTENCE: both members sit on GPU 0 (ZOTAC). The 3-GPU --fit models         #
-#   (laguna-s-2.1 / qwen3.5-122B / Qwen3.6-27B-Q8) ALSO use GPU 0 -- don't run     #
-#   those concurrently with dictation or GPU 0 will OOM. The 2-GPU entries         #
+#   COEXISTENCE: whisper-npu-asr is GPU-free (runs on the NPU). qwen-clean-2b      #
+#   sits on GPU 0 (ZOTAC), which the 3-GPU --fit models (laguna-s-2.1 /            #
+#   qwen3.5-122B / Qwen3.6-27B-Q8) ALSO use -- don't run those concurrently with  #
+#   CLEANUP, or GPU 0 will OOM (the NPU ASR still works). The 2-GPU entries       #
 #   (vLLM TP + the -sm tensor TP entry, pinned to idx 1,2) coexist with it fine.   #
 # ############################################################################## #
 groups:
@@ -811,5 +1081,5 @@ groups:
     exclusive: false
     persistent: true
     members:
-      - parakeet-asr
+      - whisper-npu-asr
       - qwen-clean-2b
