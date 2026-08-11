@@ -554,6 +554,111 @@ models:
       --port 8080
     cmdStop: docker stop laguna-mainline
 
+  # #################### #
+  # MUSE GLIMMER MODELS #
+  # #################### #
+
+  # Muse Glimmer 30B, dynamic k-quant (~19.7 GB), plus optional DFlash drafter
+  # (~1.6 GB) and vision projector (~1.4 GB). The model card calls the speculative
+  # companion DFlash (not DSpark); both companions can run together.
+  #
+  # RUNTIME: Muse Glimmer requires llama.cpp b10353+. Pin the official CUDA 13
+  # b10362 image tested here, rather than mostlygeek:cuda (currently b10326 and too
+  # old to recognize the architecture).
+  #
+  # GPU PLACEMENT: UUID pinning exposes only the two CPU-PEG Gen5 x8 cards, in
+  # 5070 Ti / MSI 5060 Ti order. The ZOTAC 5060 Ti on the x4 M.2 adapter is excluded.
+  # Equal layer split was measured with the most demanding DFlash + vision profile
+  # at ~13.5/11.3 GiB used, leaving ~2.4/4.6 GiB free including the desktop load.
+  #
+  # CONTEXT: all three profiles use one full native 131072-token slot. llama-server
+  # divides -c across -np, hence -np 1; raising -np without scaling -c would silently
+  # reduce per-request context. The plain and DFlash profiles deliberately differ
+  # only by the drafter flags, making their throughput directly comparable.
+  #
+  # The embedded chat template requires --jinja. Sampling is the model-card recipe.
+  # Reasoning is always enabled by the template; callers can set reasoning_strength
+  # (low/medium/high/xhigh) through chat_template_kwargs per request.
+  muse-glimmer-30B-plain:
+    cmd: |
+      docker run --rm --name muse-glimmer-plain --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server
+      ghcr.io/ggml-org/llama.cpp@sha256:1190d8f78e90466e6ed8c8f02eaa0eb6fd9c07b5a4ace1f669e4bbeef13775aa
+      -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
+      --jinja
+      -ngl 99
+      --tensor-split 1,1
+      --main-gpu 0
+      -c 131072
+      -np 1
+      -fa on
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop muse-glimmer-plain
+
+  muse-glimmer-30B-dflash:
+    cmd: |
+      docker run --rm --name muse-glimmer-dflash --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server
+      ghcr.io/ggml-org/llama.cpp@sha256:1190d8f78e90466e6ed8c8f02eaa0eb6fd9c07b5a4ace1f669e4bbeef13775aa
+      -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
+      -md /models/muse-glimmer/dflash-kquant.gguf
+      -ngld 99
+      --jinja
+      -ngl 99
+      --tensor-split 1,1
+      --main-gpu 0
+      -c 131072
+      -np 1
+      -fa on
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop muse-glimmer-dflash
+
+  muse-glimmer-30B-dflash-vision:
+    cmd: |
+      docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server
+      ghcr.io/ggml-org/llama.cpp@sha256:1190d8f78e90466e6ed8c8f02eaa0eb6fd9c07b5a4ace1f669e4bbeef13775aa
+      -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
+      -md /models/muse-glimmer/dflash-kquant.gguf
+      -ngld 99
+      --mmproj /models/muse-glimmer/mmproj-kquant.gguf
+      --jinja
+      -ngl 99
+      --tensor-split 1,1
+      --main-gpu 0
+      -c 131072
+      -np 1
+      -fa on
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop muse-glimmer-dflash-vision
+
   # ############ #
   # GEMMA MODELS #
   # ############ #
@@ -772,7 +877,7 @@ models:
       -p ${PORT}:8080 -v /mnt/models:/models
       # known-good image build: b10143 (first build here with `deepseek4` arch support)
       --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
-      -m /models/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
+      -m /models/deepseek-v4-flash/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
 
       # chat template ships inside the GGUF -- no --chat-template-file
       --jinja
@@ -832,8 +937,8 @@ models:
       -p ${PORT}:8080 -v /mnt/models:/models
       --entrypoint llama-server
       ghcr.io/mostlygeek/llama-swap@sha256:97ecc6acdc6341031d3f4f0cf48514ec735c1ff0c08c29f66628deda3c2dbe3d
-      -m /models/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
-      -md /models/DeepSeek-V4-Flash-MTP-Q8_0.gguf
+      -m /models/deepseek-v4-flash/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
+      -md /models/deepseek-v4-flash/DeepSeek-V4-Flash-MTP-Q8_0.gguf
       --jinja
       --fit off
       --device CUDA0,CUDA1,CUDA2
@@ -851,7 +956,7 @@ models:
       -b 2048
       -ub 512
       --temp 1.0
-      --top-p 1.0
+      --top-p 0.95
       --top-k 0
       --min-p 0.0
       --presence-penalty 0.0
@@ -891,8 +996,8 @@ models:
       -p ${PORT}:8080 -v /mnt/models:/models
       --entrypoint llama-server
       ghcr.io/mostlygeek/llama-swap@sha256:97ecc6acdc6341031d3f4f0cf48514ec735c1ff0c08c29f66628deda3c2dbe3d
-      -m /models/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
-      --model-draft /models/DeepseekV4-Flash-20260731-DSpark.gguf
+      -m /models/deepseek-v4-flash/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
+      --model-draft /models/deepseek-v4-flash/DeepseekV4-Flash-20260731-DSpark.gguf
       --jinja
       --fit off
       --device CUDA0,CUDA1,CUDA2
@@ -1061,6 +1166,7 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop qclean-2b
+
 
 # ############################################################################## #
 # GROUPS                                                                          #
