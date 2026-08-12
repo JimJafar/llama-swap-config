@@ -579,6 +579,8 @@ models:
   # The embedded chat template requires --jinja. Sampling is the model-card recipe.
   # Reasoning is always enabled by the template; callers can set reasoning_strength
   # (low/medium/high/xhigh) through chat_template_kwargs per request.
+  # IMPORTANT: -md only loads the draft weights in b10362; it does not enable them.
+  # Keep --spec-type draft-dflash. Depth 3 is the measured optimum for this drafter.
   muse-glimmer-30B-plain:
     cmd: |
       docker run --rm --name muse-glimmer-plain --runtime nvidia --cap-add SYS_ADMIN
@@ -614,6 +616,8 @@ models:
       -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
       -md /models/muse-glimmer/dflash-kquant.gguf
       -ngld 99
+      --spec-type draft-dflash
+      --spec-draft-n-max 3
       --jinja
       -ngl 99
       --tensor-split 1,1
@@ -641,6 +645,8 @@ models:
       -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
       -md /models/muse-glimmer/dflash-kquant.gguf
       -ngld 99
+      --spec-type draft-dflash
+      --spec-draft-n-max 3
       --mmproj /models/muse-glimmer/mmproj-kquant.gguf
       --jinja
       -ngl 99
