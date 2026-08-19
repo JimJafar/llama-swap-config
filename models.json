@@ -6,33 +6,11 @@
       "apiKey": "llama-swap",
       "models": [
         {
-          "id": "gemma-4-26B-MoE-MTP",
+          "id": "qwen3.6-35B-Q4",
           "input": ["text", "image"],
-          "contextWindow": 256000
-        },
-        {
-          "id": "gemma-4-31B-Q4-MTP",
-          "input": ["text", "image"],
-          "contextWindow": 75536,
+          "contextWindow": 128000,
           "reasoning": true,
           "thinkingLevelMap": { "off": null }
-        },
-        {
-          "id": "gemma-4-31B-Q4-QAT",
-          "input": ["text", "image"],
-          "contextWindow": 98304,
-          "reasoning": true,
-          "thinkingLevelMap": { "off": null }
-        },
-        {
-          "id": "deepseek-v4-flash-IQ2",
-          "input": ["text"],
-          "contextWindow": 262144
-        },
-        {
-          "id": "deepseek-v4-flash-IQ2-MTP-131K",
-          "input": ["text"],
-          "contextWindow": 131072
         },
         {
           "id": "qwen3.5-122B-IQ3-MTP",
@@ -47,44 +25,95 @@
           "thinkingLevelMap": { "off": null }
         },
         {
-          "id": "laguna-s-2.1-Q4",
+          "id": "Qwen3.8-27B-Q6_K",
+          "input": ["text"],
+          "contextWindow": 262144,
+          "reasoning": true,
+          "thinkingFormat": "qwen",
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh",
+            "xhigh": "xhigh"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": { "$var": "thinking.enabled" },
+              "reasoning_effort": { "$var": "thinking.effort" }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-27B-Q5-MTP-TP",
+          "input": ["text"],
+          "contextWindow": 175000,
+          "reasoning": true,
+          "thinkingFormat": "qwen",
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh",
+            "xhigh": "xhigh"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": { "$var": "thinking.enabled" },
+              "reasoning_effort": { "$var": "thinking.effort" }
+            }
+          }
+        },
+        {
+          "id": "laguna-s-2.1-mainline",
           "input": ["text"],
           "contextWindow": 262144
         },
         {
-          "id": "Qwen3.6-27B-Q5-MTP",
+          "id": "muse-glimmer-30B-dflash-vision",
           "input": ["text", "image"],
-          "contextWindow": 142000,
+          "contextWindow": 131072,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "reasoning_strength": { "$var": "thinking.effort" }
+            }
+          }
+        },
+        {
+          "id": "gemma-4-31B-Q4-MTP",
+          "input": ["text", "image"],
+          "contextWindow": 75536,
           "reasoning": true,
           "thinkingLevelMap": { "off": null }
         },
         {
-          "id": "Qwen3.6-27B-Q5-MTP-TP",
+          "id": "gemma-4-26B-MoE-MTP",
           "input": ["text", "image"],
-          "contextWindow": 175000,
-          "reasoning": true,
-          "thinkingLevelMap": { "off": null }
+          "contextWindow": 256000
         },
         {
-          "id": "Qwen3.6-27B-Q8-MTP",
-          "input": ["text", "image"],
-          "contextWindow": 262144,
-          "reasoning": true,
-          "thinkingLevelMap": { "off": null }
-        },
-        {
-          "id": "qwen3.6-35B-Q4",
-          "input": ["text", "image"],
-          "contextWindow": 128000,
-          "reasoning": true,
-          "thinkingLevelMap": { "off": null }
-        },
-        {
-          "id": "qwen36-27b-nvfp4",
+          "id": "deepseek-v4-flash-IQ2-MTP-131K",
           "input": ["text"],
-          "contextWindow": 100352,
-          "reasoning": true,
-          "thinkingLevelMap": { "off": null }
+          "contextWindow": 131072
+        },
+        {
+          "id": "deepseek-v4-flash-IQ2-dspark-131K",
+          "input": ["text"],
+          "contextWindow": 131072
         }
       ]
     }
