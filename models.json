@@ -7,75 +7,167 @@
       "models": [
         {
           "id": "qwen3.6-35B-Q4",
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 128000,
           "reasoning": true,
-          "thinkingLevelMap": { "off": null }
-        },
-        {
-          "id": "qwen3.5-122B-IQ3-MTP",
-          "input": ["text"],
-          "contextWindow": 131072
-        },
-        {
-          "id": "qwen3.5-9B-Q8",
-          "input": ["text"],
-          "contextWindow": 32768,
-          "reasoning": true,
-          "thinkingLevelMap": { "off": null }
-        },
-        {
-          "id": "Qwen3.8-27B-Q6_K",
-          "input": ["text"],
-          "contextWindow": 262144,
-          "reasoning": true,
-          "thinkingFormat": "qwen",
-          "thinkingLevelMap": {
-            "off": null,
-            "minimal": "low",
-            "low": "low",
-            "medium": "medium",
-            "high": "xhigh",
-            "xhigh": "xhigh"
-          },
+          "thinkingLevelMap": {},
           "compat": {
             "thinkingFormat": "chat-template",
             "chatTemplateKwargs": {
-              "enable_thinking": { "$var": "thinking.enabled" },
-              "reasoning_effort": { "$var": "thinking.effort" }
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
             }
           }
         },
         {
-          "id": "Qwen3.8-27B-Q5-MTP-TP",
-          "input": ["text"],
-          "contextWindow": 175000,
+          "id": "qwen3.5-122B-IQ3-MTP",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 131072,
           "reasoning": true,
-          "thinkingFormat": "qwen",
+          "thinkingLevelMap": {},
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
+            }
+          }
+        },
+        {
+          "id": "qwen3.5-9B-Q8",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 32768,
+          "reasoning": true,
+          "thinkingLevelMap": {},
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
+            }
+          }
+        },
+        {
+          "id": "qwen3.5-9B-Q8-curator-grooming",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 32768,
+          "reasoning": true,
+          "thinkingLevelMap": {},
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
+            }
+          }
+        },
+        {
+          "id": "qwen3.5-9B-Q8-curator-harvesting",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 32768,
+          "reasoning": true,
+          "thinkingLevelMap": {},
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-27B-UD-Q6_K_M",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 120000,
+          "reasoning": true,
           "thinkingLevelMap": {
-            "off": null,
-            "minimal": "low",
+            "minimal": null,
             "low": "low",
             "medium": "medium",
-            "high": "xhigh",
-            "xhigh": "xhigh"
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": null
           },
           "compat": {
             "thinkingFormat": "chat-template",
             "chatTemplateKwargs": {
-              "enable_thinking": { "$var": "thinking.enabled" },
-              "reasoning_effort": { "$var": "thinking.effort" }
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 262144,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
             }
           }
         },
         {
           "id": "laguna-s-2.1-mainline",
-          "input": ["text"],
-          "contextWindow": 262144
+          "input": [
+            "text"
+          ],
+          "contextWindow": 262144,
+          "reasoning": true,
+          "thinkingLevelMap": {},
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
+            }
+          }
         },
         {
           "id": "muse-glimmer-30B-dflash-vision",
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 131072,
           "reasoning": true,
           "thinkingLevelMap": {
@@ -89,38 +181,127 @@
           "compat": {
             "thinkingFormat": "chat-template",
             "chatTemplateKwargs": {
-              "reasoning_strength": { "$var": "thinking.effort" }
+              "reasoning_strength": {
+                "$var": "thinking.effort"
+              }
             }
           }
         },
         {
           "id": "gemma-4-31B-Q4-MTP",
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 75536,
           "reasoning": true,
-          "thinkingLevelMap": { "off": null }
+          "thinkingLevelMap": {
+            "off": null
+          }
         },
         {
           "id": "gemma-4-26B-MoE-MTP",
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 256000
         },
         {
           "id": "deepseek-v4-flash-IQ2-MTP-131K",
-          "input": ["text"],
-          "contextWindow": 131072
+          "input": [
+            "text"
+          ],
+          "contextWindow": 131072,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
         },
         {
           "id": "deepseek-v4-flash-IQ2-dspark-131K",
-          "input": ["text"],
-          "contextWindow": 131072
+          "input": [
+            "text"
+          ],
+          "contextWindow": 131072,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-27B-UD-Q6_K_M-instruct",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 120000,
+          "reasoning": false,
+          "name": "Qwen3.8-27B-UD-Q6_K_M (instruct)",
+          "samplingParams": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP-instruct",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 262144,
+          "reasoning": false,
+          "name": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP (instruct)",
+          "samplingParams": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
         }
       ]
     }
-  },
-  "compaction": {
-    "enabled": true,
-    "reserveTokens": 16384,
-    "keepRecentTokens": 20000
   }
 }
