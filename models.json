@@ -8,8 +8,7 @@
         {
           "id": "qwen3.6-35B-Q4",
           "input": [
-            "text",
-            "image"
+            "text"
           ],
           "contextWindow": 128000,
           "reasoning": true,
@@ -41,45 +40,11 @@
           }
         },
         {
-          "id": "qwen3.5-9B-Q8",
+          "id": "Qwen3.5-9B-Q4",
           "input": [
             "text"
           ],
-          "contextWindow": 32768,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          }
-        },
-        {
-          "id": "qwen3.5-9B-Q8-curator-grooming",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 32768,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          }
-        },
-        {
-          "id": "qwen3.5-9B-Q8-curator-harvesting",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 32768,
+          "contextWindow": 250000,
           "reasoning": true,
           "thinkingLevelMap": {},
           "compat": {
