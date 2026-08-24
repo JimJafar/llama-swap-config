@@ -255,7 +255,7 @@ models:
                 --min-p 0.0
                 --presence-penalty 0.0
                 --repeat-penalty 1.0
-                --reasoning-format none
+                --reasoning-format deepseek
                 --reasoning-budget -1
                 --chat-template-kwargs "{\"preserve_thinking\": true}"
                 --timeout 900
