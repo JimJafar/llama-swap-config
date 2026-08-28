@@ -173,6 +173,13 @@
           "contextWindow": 256000
         },
         {
+          "id": "gemma-4-E4B-MTP",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 262144
+        },
+        {
           "id": "deepseek-v4-flash-IQ2-MTP-131K",
           "input": [
             "text"
