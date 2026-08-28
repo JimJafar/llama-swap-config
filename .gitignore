@@ -1,7 +1,3 @@
 # vendored NCCL (refetch: pip download --no-deps nvidia-nccl-cu12)
 vendor/
 
-# llama.cpp MTP build workspace (regenerable)
-build-mtp/
-# runtime append-only logs
-memory-monitor.log
