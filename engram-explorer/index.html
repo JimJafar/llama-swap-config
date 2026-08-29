@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EnGram Explorer · Qwen3.8-Flash-Next</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <div>
+      <h1>EnGram Explorer</h1>
+      <p class="sub">token-continuation browser · <code>Qwen3.8-Flash-Next</code> (reasoning off)</p>
+    </div>
+  </div>
+  <div class="status" id="status">
+    <span class="dot idle" id="statusDot"></span><span id="statusText">idle</span>
+  </div>
+</header>
+
+<main>
+  <!-- Search / seed -->
+  <section class="seed">
+    <label for="tokenSearch" class="field-label">Type to find a token</label>
+    <div class="searchwrap">
+      <input id="tokenSearch" type="text" placeholder="e.g. cat, Theorem, éclair, &lt;0x&gt;…" autocomplete="off" spellcheck="false">
+      <button id="seedBtn" class="ghost" title="Encode typed text as tokens & start here">Encode &amp; start ↵</button>
+    </div>
+    <div id="tokenDropdown" class="dropdown hidden"></div>
+  </section>
+
+  <!-- Current sequence -->
+  <section class="sequence">
+    <div class="section-head">
+      <span class="field-label">Current token sequence</span>
+      <button id="clearBtn" class="link">clear</button>
+    </div>
+    <div id="sequenceBar" class="seqbar empty">
+      <span class="placeholder">Select a token below or press <em>Encode &amp; start</em>.</span>
+    </div>
+  </section>
+
+  <!-- Continuations -->
+  <section class="cont-section">
+    <div class="section-head">
+      <span class="field-label" id="contLabel">Next-token continuations</span>
+      <span class="muted" id="contMeta"></span>
+    </div>
+    <div id="continuations" class="contlist">
+      <div class="empty-state">
+        <p>Nothing here yet.</p>
+        <p class="muted">Pick a token from the dropdown, or type a phrase and press <em>Encode &amp; start</em>.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="footnote">Continuations are the live top-K next-token distribution from the model (temperature 0). The PLE/engram table feeds the model's layer-1 memory read; this tool shows what the model is most likely to emit next. Click a continuation to append it and continue the chain.</p>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
