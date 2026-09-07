@@ -23,23 +23,6 @@
           }
         },
         {
-          "id": "qwen3.5-122B-IQ3-MTP",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 131072,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          }
-        },
-        {
           "id": "Qwen3.5-9B-Q4",
           "input": [
             "text"
@@ -52,6 +35,87 @@
             "chatTemplateKwargs": {
               "enable_thinking": {
                 "$var": "thinking.enabled"
+              }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 196608,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 196608,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 196608,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
               }
             }
           }
@@ -85,6 +149,33 @@
         },
         {
           "id": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 245760,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP",
           "input": [
             "text"
           ],
@@ -234,6 +325,66 @@
           }
         },
         {
+          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-instruct",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 196608,
+          "reasoning": false,
+          "name": "Qwen3.8-Flash-Next-UD-IQ4_XS (instruct)",
+          "samplingParams": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP-instruct",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 196608,
+          "reasoning": false,
+          "name": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP (instruct)",
+          "samplingParams": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore-instruct",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 196608,
+          "reasoning": false,
+          "name": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore (instruct)",
+          "samplingParams": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
+        },
+        {
           "id": "Qwen3.8-27B-UD-Q6_K_M-instruct",
           "input": [
             "text"
@@ -258,9 +409,29 @@
           "input": [
             "text"
           ],
-          "contextWindow": 262144,
+          "contextWindow": 245760,
           "reasoning": false,
           "name": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP (instruct)",
+          "samplingParams": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          }
+        },
+        {
+          "id": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP-instruct",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 262144,
+          "reasoning": false,
+          "name": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP (instruct)",
           "samplingParams": {
             "temperature": 0.7,
             "top_p": 0.8,

@@ -70,20 +70,18 @@ hooks:
 # *(Note: Setting this to false will reduce your KV Cache hit rate during multi-turn chats because the prompt string will dynamically mutate).*
 
 # ############################################################################## #
-# GPU TOPOLOGY (2 GPUs, 40 GB VRAM total; rebuilt 2026-09-06)                    #
-#   Post-rebuild hardware: RTX 3090 (24 GiB) added; the old RTX 5070 Ti (d64df8cf)#
-#   and the ZOTAC 5060 Ti (af5bd53f, x4 M.2 adapter) are no longer installed. The #
-#   only two cards present are the two CPU-PEG slots below. pin bandwidth-sens-  #
-#   itive (-sm tensor) entries by UUID (fastest-first CUDA order = index order).  #
+# GPU TOPOLOGY (3 GPUs, 48 GB VRAM total; 3rd GPU added 2026-07-21)               #
+#   llama.cpp defaults to fastest-first CUDA order (CUDA0 = 5070 Ti); pin         #
+#   bandwidth-sensitive (-sm tensor) entries by UUID. vLLM entries set PCI_BUS_ID.#
 #                                                                                 #
-#   PCI       Card                VRAM      Role         UUID prefix / CUDA idx   #
-#   01:00.0   RTX 5060 Ti         16 GiB    compute      57bbb375  / CUDA 1       #
-#   02:00.0   RTX 3090            24 GiB    desktop/CPEG 93ab52e5  / CUDA 0       #
+#   PCI       Card                  Link                   UUID prefix / PCI idx  #
+#   01:00.0   RTX 5060 Ti (ZOTAC)   Gen4 x4 (M.2 adapter)  af5bd53f  / idx 0      #
+#   02:00.0   RTX 5070 Ti (Palit)   Gen5 x8 (CPU PEG)      d64df8cf  / idx 1      #
+#   03:00.0   RTX 5060 Ti (MSI)     Gen5 x8 (CPU PEG)      57bbb375  / idx 2      #
 #                                                                                 #
-#   The 3090 is the display card (kwin/compositor on it, ~0.6-0.7 GiB). For the   #
-#   -sm tensor TP pair put the 3090 FIRST (CUDA0/--main-gpu 0) and bias           #
-#   --tensor-split toward it so it carries most weights + the larger KV share.    #
-#   Any entry still naming d64df8cf or af5bd53f is stale and will fail to load.   #
+#   Keep TP all-reduce on the two x8/Gen5 cards (PCI idx 1,2 / UUIDs d64df8cf +   #
+#   57bbb375). The ZOTAC on the x4 adapter is fine for layer-split, MoE RAM       #
+#   offload, and embeddings, but a poor TP leg (slow all-reduce over x4).         #
 # ############################################################################## #
 
 preload:
@@ -630,15 +628,13 @@ models:
     cmd: |
       docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
-      # GPU re-pin for the post-rebuild topology (2026-09-06): the old "MSI 5060 Ti
-      # + Palit 5070 Ti" pair is gone (5070 Ti d64df8cf and ZOTAC af5bd53f no longer
-      # present). Machine now has an RTX 3090 (93ab52e5, 24 GiB, CPU PEG @ 02:00.0,
-      # = desktop/display card) + the 5060 Ti (57bbb375, 16 GiB @ 01:00.0).
-      # CUDA0 = 3090 (biggest card, --main-gpu 0), CUDA1 = 5060 Ti. tensor-split is
-      # weighted toward the 3090 so it holds most of the weights AND its (larger)
-      # share of the unified KV pool; -c is at the 262144 native ceiling to spend
-      # the 3090's spare VRAM on KV.
-      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      # Same 2-card UUID pinning as Qwen3.8-27B-Q5-MTP-TP (MSI 5060 Ti first =
+      # device0), board/enumeration-independent. TP stays on the two Gen5 x8 cards
+      # and never touches the Zotac, so it coexists with resident Gemma AND keeps
+      # the 50-64 t/s tensor-split decode. (A 3-way layer split that used the Zotac
+      # tanked decode to ~3.5 t/s over the x4 leg + CPU-bound MTP sampling; reverted
+      # 2026-09-03.)
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
@@ -652,7 +648,7 @@ models:
       --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
 
       -ngl 99
-      --flash-attn off
+      --flash-attn on
       -sm tensor
       --fit off
 
@@ -665,23 +661,21 @@ models:
       --spec-ngram-mod-n-max 64
 
       -b 2048
-      # 2-slot unified shared KV pool: two slots share one pool on the fast TP pair;
-      # idle slots cost ~0. -c is the TOTAL pool (KV allocated up front, split across
-      # the two TP ranks). At the 262144 native ceiling with the 3090-biased split
-      # the big card holds most weights + the larger KV share. NOTE: the Meta() split
-      # ratio is a SHARP threshold -- if CUDA1 (5060 Ti, 16 GiB) OOMs at load, ease
-      # the ratio up toward 1.00,0.60; if the 3090 (CUDA0) shows large idle headroom
-      # after load, push it down to give it even more weights/KV.
-      -c 262144
+      # 2-slot unified shared KV pool (2026-09-03): two slots share one pool on the
+      # fast TP pair; idle slots cost ~0 so a lone user still gets up to the per-slot
+      # cap. Size -c + tensor-split so the MSI 5060 is used fully while the desktop
+      # 5070 keeps ~700 MiB headroom. -c here is the TOTAL pool (KV allocated up
+      # front to this many tokens, split across the two TP ranks).
+      -c 245760
       -ctk q8_0
       -ctv q8_0
       # --kv-unified
-      # --kv-unified-per-slot 262144
+      # --kv-unified-per-slot 245760
       --main-gpu 0
-      # Weighted toward the 3090 (24 GiB, CUDA0/display) over the 5060 Ti (16 GiB,
-      # CUDA1). 1.00,0.50 -> ~2/3 of the weights on the 3090. Starting probe -- tune
-      # against the actual per-GPU load after a test load (see note above).
-      --tensor-split 1.00,0.50
+      # Even split near the native ceiling. Trimmed -c below the 262144 native max
+      # so the desktop 5070 keeps ~700 MiB free; the sharp Meta() ratio threshold
+      # makes strong bias OOM the MSI, so even is the safe balance.
+      --tensor-split 1.00,1.00
       # -np 2
       -ub 512
       --temp 1.0

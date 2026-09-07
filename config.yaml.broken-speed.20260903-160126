@@ -25,11 +25,6 @@ hooks:
   on_startup:
     preload:
       - whisper-npu-asr
-      # s1-mini is tiny (462 MiB) and its load is ~seconds, so preloading it at every
-      # llama-swap start keeps Baruch's first dictation warm without startup cost worth
-      # worrying about. (Baruch also warms it on its own start; this covers the case
-      # where llama-swap restarts after Baruch has already booted.)
-      - s1-mini
 
 # Qwen 3.5/3.6/3.8 jinja template fix
 #
@@ -70,20 +65,18 @@ hooks:
 # *(Note: Setting this to false will reduce your KV Cache hit rate during multi-turn chats because the prompt string will dynamically mutate).*
 
 # ############################################################################## #
-# GPU TOPOLOGY (2 GPUs, 40 GB VRAM total; rebuilt 2026-09-06)                    #
-#   Post-rebuild hardware: RTX 3090 (24 GiB) added; the old RTX 5070 Ti (d64df8cf)#
-#   and the ZOTAC 5060 Ti (af5bd53f, x4 M.2 adapter) are no longer installed. The #
-#   only two cards present are the two CPU-PEG slots below. pin bandwidth-sens-  #
-#   itive (-sm tensor) entries by UUID (fastest-first CUDA order = index order).  #
+# GPU TOPOLOGY (3 GPUs, 48 GB VRAM total; 3rd GPU added 2026-07-21)               #
+#   llama.cpp defaults to fastest-first CUDA order (CUDA0 = 5070 Ti); pin         #
+#   bandwidth-sensitive (-sm tensor) entries by UUID. vLLM entries set PCI_BUS_ID.#
 #                                                                                 #
-#   PCI       Card                VRAM      Role         UUID prefix / CUDA idx   #
-#   01:00.0   RTX 5060 Ti         16 GiB    compute      57bbb375  / CUDA 1       #
-#   02:00.0   RTX 3090            24 GiB    desktop/CPEG 93ab52e5  / CUDA 0       #
+#   PCI       Card                  Link                   UUID prefix / PCI idx  #
+#   01:00.0   RTX 5060 Ti (ZOTAC)   Gen4 x4 (M.2 adapter)  af5bd53f  / idx 0      #
+#   02:00.0   RTX 5070 Ti (Palit)   Gen5 x8 (CPU PEG)      d64df8cf  / idx 1      #
+#   03:00.0   RTX 5060 Ti (MSI)     Gen5 x8 (CPU PEG)      57bbb375  / idx 2      #
 #                                                                                 #
-#   The 3090 is the display card (kwin/compositor on it, ~0.6-0.7 GiB). For the   #
-#   -sm tensor TP pair put the 3090 FIRST (CUDA0/--main-gpu 0) and bias           #
-#   --tensor-split toward it so it carries most weights + the larger KV share.    #
-#   Any entry still naming d64df8cf or af5bd53f is stale and will fail to load.   #
+#   Keep TP all-reduce on the two x8/Gen5 cards (PCI idx 1,2 / UUIDs d64df8cf +   #
+#   57bbb375). The ZOTAC on the x4 adapter is fine for layer-split, MoE RAM       #
+#   offload, and embeddings, but a poor TP leg (slow all-reduce over x4).         #
 # ############################################################################## #
 
 preload:
@@ -401,52 +394,6 @@ models:
       --port 8080
     cmdStop: docker stop qwen38-flash-next
 
-    # MTP TEST entry (2026-09-03): clone of the AtomicChat flash entry above but
-    # running on the locally-built danielhanchen/llama.cpp qwen4exp/mtp image
-    # (local/llama-swap:cuda-mtp-qwen4exp) with a real MTP draft. NOTE: unvalidated;
-    # the standalone draft may require the Unsloth UD target rather than AtomicChat.
-  Qwen3.8-Flash-Next-UD-IQ4_XS-MTP:
-    cmd: |
-      docker run --rm --name qwen38-flash-mtp --runtime nvidia --ipc=host
-      -e LLAMA_ATTN_ROT_DISABLE=1
-      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/models:/models
-      --entrypoint /app/llama-server local/llama-swap:cuda-mtp-qwen4exp
-      -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
-      -md /models/mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf
-      --fit on
-      --device CUDA0,CUDA1,CUDA2
-      --threads 20
-      --jinja
-      --flash-attn on
-      -c 196608
-      -b 512
-      -ub 256
-      -ctk q8_0
-      -ctv q8_0
-      -np 1
-
-      --spec-type draft-mtp,ngram-mod
-      --spec-draft-n-max 3
-      --spec-draft-p-min 0.75
-      --spec-ngram-mod-n-match 24
-      --spec-ngram-mod-n-min 24
-      --spec-ngram-mod-n-max 86
-
-      --reasoning-format deepseek
-      --reasoning on
-      --reasoning-preserve
-      --temp 1.0
-      --top-p 0.95
-      --top-k 20
-      --min-p 0.0
-      --presence-penalty 0.0
-      --repeat-penalty 1.0
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop qwen38-flash-mtp
-
   Qwen3.8-Flash-Next-UD-IQ4_XS-explore:
     cmd: |
       docker run --rm --name qwen38-flash-next-explore --runtime nvidia --ipc=host
@@ -629,19 +576,10 @@ models:
   Qwen3.8-27B-UD-IQ4_XS-MTP-TP:
     cmd: |
       docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
-      --ipc=host
-      # GPU re-pin for the post-rebuild topology (2026-09-06): the old "MSI 5060 Ti
-      # + Palit 5070 Ti" pair is gone (5070 Ti d64df8cf and ZOTAC af5bd53f no longer
-      # present). Machine now has an RTX 3090 (93ab52e5, 24 GiB, CPU PEG @ 02:00.0,
-      # = desktop/display card) + the 5060 Ti (57bbb375, 16 GiB @ 01:00.0).
-      # CUDA0 = 3090 (biggest card, --main-gpu 0), CUDA1 = 5060 Ti. tensor-split is
-      # weighted toward the 3090 so it holds most of the weights AND its (larger)
-      # share of the unified KV pool; -c is at the 262144 native ceiling to spend
-      # the 3090's spare VRAM on KV.
-      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
-      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
-      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      # 3-GPU layer split. Gemma is loaded first by switch-profile.sh; CUDA2 then
+      # receives all remaining Zotac capacity, while both 5060s have no artificial
+      # fit margin. CUDA0 retains desktop/prefill safety margin.
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
       -m /models/Qwen3.8-27B-UD-IQ4_XS.gguf
@@ -651,12 +589,14 @@ models:
       --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
       --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
 
-      -ngl 99
-      --flash-attn off
-      -sm tensor
-      --fit off
+      --flash-attn on
+      --device CUDA0,CUDA1,CUDA2
+      -sm layer
+      --fit on
+      --fit-target 1024,0,0
 
       # draft speculation - MTP + ngram
+      # sibling (depth sweep: n_max 3; draft KV f16 default; ngram 24/48/64).
       --spec-type draft-mtp,ngram-mod
       -md /models/qwen3.8-mtp-Q4_0.gguf
       --spec-draft-n-max 3
@@ -664,26 +604,32 @@ models:
       --spec-ngram-mod-n-min 48
       --spec-ngram-mod-n-max 64
 
-      -b 2048
-      # 2-slot unified shared KV pool: two slots share one pool on the fast TP pair;
-      # idle slots cost ~0. -c is the TOTAL pool (KV allocated up front, split across
-      # the two TP ranks). At the 262144 native ceiling with the 3090-biased split
-      # the big card holds most weights + the larger KV share. NOTE: the Meta() split
-      # ratio is a SHARP threshold -- if CUDA1 (5060 Ti, 16 GiB) OOMs at load, ease
-      # the ratio up toward 1.00,0.60; if the 3090 (CUDA0) shows large idle headroom
-      # after load, push it down to give it even more weights/KV.
-      -c 262144
+      -b 512
+      # Shared KV pool: three slots dynamically share 524K total; each one is capped
+      # at the model's native 262K context. Small batches constrain prefill buffers.
+      # CONTEXT PROBE COMPLETE (2026-08-19 v1): 262144 OOMs on first ubatch;
+      # 245760 (240K) loaded but MSI hit 94.7% with ~0.9 GB free = the 935 MiB
+      # compute buffer -> would OOM on a real near-full prefill, so v1 settled
+      # at 229376 (224K): MSI 91.9% / ~1.4 GB free, +49K over the Q5's 175K.
+      # Note: IQ4_XS DOES tensor-split in build 10362 (no SPLIT_AXIS_UNKNOWN
+      # abort) - the old plain-quant caveat no longer applies here.
+      #
+      # v2 (2026-08-19, desktop OpenGL headroom): the v1 245760 ceiling was an
+      # artifact of the OLD 1.01,1 split (ALL the pp/compute pressure landed on
+      # the MSI). At 1.00,1.00 the load is balanced and the compute buffers
+      # split ~50/50, so -c now runs at 262144 (native max): MSI 1545 MiB
+      # free / 5070 464 MiB total free. The 5070 free is tight BECAUSE the
+      # desktop (~600 MiB Xorg) lives on it; a desktop spike or a near-full
+      # prefill can still OOM it. If that happens: move the desktop to the
+      # idle ZOTAC 5060 Ti, or step -c down (253952 -> 245760) -- measured
+      # 1.00,1.00 footprint @245K was MSI 1945 / 5070 865 free.
+      -c 524288
       -ctk q8_0
       -ctv q8_0
-      # --kv-unified
-      # --kv-unified-per-slot 262144
-      --main-gpu 0
-      # Weighted toward the 3090 (24 GiB, CUDA0/display) over the 5060 Ti (16 GiB,
-      # CUDA1). 1.00,0.50 -> ~2/3 of the weights on the 3090. Starting probe -- tune
-      # against the actual per-GPU load after a test load (see note above).
-      --tensor-split 1.00,0.50
-      # -np 2
-      -ub 512
+      --kv-unified
+      --kv-unified-per-slot 262144
+      -np 3
+      -ub 64
       --temp 1.0
       --top-p 0.95
       --top-k 20
@@ -780,6 +726,83 @@ models:
     # Required by sync-models.py for the generated fixed-off instruct variant.
     aliases:
       - "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP-llama-cpp-instruct"
+
+    # --- VLLM NVFP4 entry (added 2026-08-31) ---
+    # Qwen3.8-27B via vLLM (PagedAttention). Model: pottokao/Qwen3.8-27B-NVFP4-MTP-2x16GB
+    # (~21 GB; NVFP4 W4A16 MLP + FP8 attn + FP8 KV, native BF16 MTP head K=4), tensor-
+    # parallel on the SAME two cards as the llama.cpp IQ4_XS TP variant (MSI 5060 Ti +
+    # 5070 Ti, UUID-pinned). Exposed as Qwen3.8-27B-UD-IQ4_XS-MTP-TP-vLLM (secondary);
+    # the plain Qwen3.8-27B-UD-IQ4_XS-MTP-TP name belongs to the llama.cpp entry above.
+    # CURRENTLY BROKEN ON THIS HOST: OOMs at load on the 5070 -- see the OOM note below.
+    #
+    # WHY VLLM FOR CONCURRENCY: unlike llama.cpp's -c x -np pre-split (each of np slots
+    # gets ctx/np regardless of use), vLLM pages the KV from ONE shared pool sized to fit
+    # VRAM, so each concurrent user gets up to --max-model-len and idle users cost ~0.
+    #
+    # HOST-GOTCHA DRIVE (all measured 2026-09-01):
+    #  - The monitor is PHYSICALLY on the 5070 Ti (GPU index 1), so its desktop footprint
+    #    (~0.85 GiB) cannot move without replugging the cable. TP=3 is impossible (4 KV
+    #    heads, not divisible by 3).
+    #  - markdown-rag was moved OFF the 5070 to the ZOTAC (pm2 ecosystem-markdown-rag.config.cjs)
+    #    freeing ~0.5 GiB; the 5070 now has ~14.2 GiB free for vLLM.
+    #  - v0.28.0 DEADLOCKS at startup on this host (fp8_gemm AutoTuner + shared-memory
+    #    weight-broadcast ring buffer never frees). FIX: --no-enable-flashinfer-autotune
+    #    (confirmed: 'Application startup complete' + health 200 only with this flag).
+    #  - Measured: weights ~11.3 GiB/card, KV pool ~2.34 GiB = ~118K tokens total. max-
+    #    model-len 98304 (96K) per user; pool supports ~1.2 full-ctx users, or 2 users
+    #    ~59K each. gpu-memory-utilization 0.90 = 250 MiB margin under the 5070's free.
+    #  - --enforce-eager kept: frees the ~1.1 GiB CUDA-graph reservation (would otherwise
+    #    OOM the 5070); no graphs but MTP K=4 still speculative-decodes.
+    #  - MTP head must stay inside the checkpoint (method "mtp", K=4).
+    #
+    # NOTE: pottokao's original 2x16GB build hit 150K on CLEAN 5070s; this host's desktop
+    # caps us at ~96K. If the 5070 desktop ever shrinks (apps closed), raise max-model-len
+    # toward ~114K (pool limit) and util to 0.92+.
+  Qwen3.8-27B-UD-IQ4_XS-MTP-TP-vLLM:
+    cmd: |
+      docker run --rm --name q38nvfp4 --runtime nvidia --ipc=host
+      # Same 2-card UUID pinning as the llama.cpp IQ4_XS TP entry
+      # (MSI 5060 Ti first = device0), board/enumeration-independent.
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+      -e VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE=67108864
+      -e VLLM_NO_USAGE_STATS=1
+      -p ${PORT}:8000 -v /mnt/shared/models:/models
+      vllm/vllm-openai:v0.28.0
+      --model /models/vllm-direct/Qwen3.8-27B-NVFP4-MTP-2x16GB
+      --served-model-name Qwen3.8-27B-UD-IQ4_XS-MTP-TP-vLLM
+      --trust-remote-code
+      --tensor-parallel-size 2
+      --language-model-only
+      --kv-cache-dtype fp8
+      --attention-backend TRITON_ATTN
+      --mamba-cache-dtype bfloat16
+      --mamba-ssm-cache-dtype bfloat16
+      --gpu-memory-utilization 0.90
+      --max-model-len 98304
+      --max-num-seqs 3
+      --max-num-batched-tokens 1024
+      --enable-chunked-prefill
+      --enforce-eager
+      # REQUIRED on this host: without this, v0.28.0 deadlocks in startup (fp8_gemm
+      # autotuner holds the TP workers; the shared-memory weight broadcast never frees).
+      --no-enable-flashinfer-autotune
+      --speculative-config '{"method":"mtp","num_speculative_tokens":4}'
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_xml
+      --enable-auto-tool-choice
+      --disable-custom-all-reduce
+      --host 0.0.0.0
+      --port 8000
+    cmdStop: docker stop q38nvfp4
+    # Instruct-mode alias: sync-models.py emits <id>-instruct for any id containing
+    # "Qwen3.8"; this routes it to vLLM (same upstream as the base name). This is the
+    # vLLM-specific -vLLM-instruct variant; the plain -instruct routes to the llama.cpp
+    # primary.
+    aliases:
+      - "Qwen3.8-27B-UD-IQ4_XS-MTP-TP-vLLM-instruct"
 
     # Laguna-S-2.1 (poolside): 117.6B-total / 8.5B-active MoE, `laguna` arch, 262K native ctx,
     # agentic-coding. Quant: unsloth UD-IQ4_XS, 3 shards (~57.6 GB) -- point -m at the FIRST shard,
@@ -1388,58 +1411,6 @@ models:
       --port 8080
     cmdStop: docker stop qclean-2b
 
-    # --- CLEANUP (current): S1-mini text normalizer (added 2026-09-05) ------------------
-    # S1-mini by Superwhisper (superwhisper/s1-mini, v1): a 0.6B (596M unique params)
-    # text normalizer for ASR output, fine-tuned from Qwen3-0.6B. 94.8% token accuracy
-    # on a 7.5k-case English held-out set; English only. GGUF = the Q4_K_M build
-    # (462 MiB). Now baruch-server's cleanup model (replaces gemma-4-E4B-MTP; the
-    # qwen-clean-2b entry above stays for fallback/A-B).
-    #
-    # STRICT INPUT CONTRACT (from the model card -- deviating can produce garbled or
-    # blank output; nearly every integration bug traces to one of these two things):
-    #  - System prompt must be EXACTLY the card's (baruch_server/prompts.py ships it).
-    #  - User message = one control line + newline + the raw transcript:
-    #      [Styling: casual|semi-casual|semi-formal|formal] [Structure: prose|lists] [Context: general|email]
-    #  - enable_thinking MUST be false in the template. S1 was trained with thinking
-    #    OFF; leaving it on emits an empty think block and NO usable output -- the #1
-    #    blank-result bug. Do NOT substitute --reasoning-budget 0 (suppresses the think
-    #    block a different way and degrades output).
-    #  - Decode greedily: --temp 0 (normalization is deterministic; sampling adds variance).
-    #  - Keep single passes under ~1000 tokens; chunk longer transcripts (client's job).
-    #  - Output is plain text, may be EMPTY for filler-only input -- callers must treat
-    #    "" as a valid result. Output length ~= input length.
-    #
-    # PLACEMENT (ZOTAC, single-GPU): UUID-pinned like the other dictation models.
-    # 462 MiB of weights -- trivially fits beside gemma-4-E4B-MTP in the persistent
-    # gemma-resident group (swap:false keeps them resident together; exclusive:false
-    # keeps them coexisting with the qwen38-workload 27B/Flash-Next entries: the TP
-    # 27B entries never touch the ZOTAC, and Flash-Next's --fit simply finds ~0.5 GB
-    # less headroom on this card). License: Apache-2.0 + naming clause (keep the name
-    # "S1-mini" by "Superwhisper" wherever it's used).
-  s1-mini:
-    cmd: |
-      docker run --rm --name s1mini --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
-      -m /models/s1-mini-q4_k_m.gguf
-      # S1 contract: built-in Qwen3 template via --jinja with thinking OFF
-      # (the exact recipe from the model card's llama.cpp section).
-      --jinja
-      --chat-template-kwargs "{\"enable_thinking\":false}"
-      -ngl 99
-      # Dictation-length input; ~1k tokens is the model's sweet spot, 8K leaves
-      # headroom for long clips while KV stays well under 1 GB.
-      -c 8192
-      -fa on
-      -np 1
-      --no-mmap
-      --temp 0
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop s1mini
-
     # ############################################################################## #
     # GROUPS                                                                          #
     #   `dictation`: keep ASR (NPU) + cleanup LLM (ZOTAC) resident together.         #
@@ -1461,13 +1432,10 @@ groups:
     members:
       - gemma-4-E4B-MTP
       - whisper-npu-asr
-      - s1-mini
   "qwen38-workload":
     swap: true
     exclusive: false
     persistent: false
     members:
       - Qwen3.8-27B-UD-IQ4_XS-MTP-TP
-      - Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP
       - Qwen3.8-Flash-Next-UD-IQ4_XS
-      - Qwen3.8-Flash-Next-UD-IQ4_XS-MTP

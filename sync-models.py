@@ -3,9 +3,9 @@
 
 - Model list = every entry in config.yaml `models:` that is not `unlisted`
   and not in EXCLUDES.
-- contextWindow = taken from the model's `-c N` or `--fit-ctx N` flag in
-  its cmd (falls back to whatever the current models.json says, then to
-  DEFAULT_CONTEXT_WINDOW).
+- contextWindow = taken from the model's `-c N`, `--fit-ctx N` or
+  vLLM `--max-model-len N` flag in its cmd (falls back to whatever the
+  current models.json says, then to DEFAULT_CONTEXT_WINDOW).
 - Curated per-model fields (reasoning, input, thinkingLevelMap, compat,
   thinkingFormat, ...) are preserved from the existing models.json for
   ids it already has; brand-new ids get a minimal entry
@@ -187,7 +187,11 @@ PROVIDER = {
 
 def context_window(cmd: str) -> int | None:
     try:
-        m = re.search(r"(?:^|\s)-c\s+(\d+)", cmd) or re.search(r"--fit-ctx\s+(\d+)", cmd)
+        m = (
+            re.search(r"(?:^|\s)-c\s+(\d+)", cmd)
+            or re.search(r"--fit-ctx\s+(\d+)", cmd)
+            or re.search(r"--max-model-len\s+(\d+)", cmd)
+        )
         return int(m.group(1)) if m else None
     except (re.error, ValueError):
         return None
