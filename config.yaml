@@ -9,8 +9,12 @@
 #   --runtime nvidia --cap-add SYS_ADMIN  (matches the previously-working setup)
 #   --entrypoint /app/llama-server        (image entrypoint is llama-swap)
 #
-# Rolling bundled CUDA image last pulled 2026-09-02: llama.cpp b10752
-# (commit b96806d96, digest sha256:607afde81750f2f61bacaba8655f59104a54a54c097cd5f411ab90f1e8ebeb00).
+# IMAGE POLICY (2026-09-07): do NOT pin llama.cpp / vLLM / llama-swap builds. Everything
+# tracks mainline "latest": official ggml-org llama.cpp uses the rolling server-cuda13 tag;
+# llama-swap's bundled image is its rolling :cuda tag. These tags only advance when you
+# `docker pull`, so include image pulls in the normal update step. The one deliberate
+# exception is a local fork build (local/llama-swap:...) while its feature is still unmerged;
+# revert it to mainline latest the moment the feature lands.
 #
 # Max seconds to wait for a model to become ready after launch. Raised from the 120s
 # default for the vLLM entries (e.g. qwen36-27b-nvfp4), which take ~180s to load + capture graphs.
@@ -69,22 +73,24 @@ hooks:
 # ```
 # *(Note: Setting this to false will reduce your KV Cache hit rate during multi-turn chats because the prompt string will dynamically mutate).*
 
-# ############################################################################## #
-# GPU TOPOLOGY (2 GPUs, 40 GB VRAM total; rebuilt 2026-09-06)                    #
-#   Post-rebuild hardware: RTX 3090 (24 GiB) added; the old RTX 5070 Ti (d64df8cf)#
-#   and the ZOTAC 5060 Ti (af5bd53f, x4 M.2 adapter) are no longer installed. The #
-#   only two cards present are the two CPU-PEG slots below. pin bandwidth-sens-  #
-#   itive (-sm tensor) entries by UUID (fastest-first CUDA order = index order).  #
-#                                                                                 #
-#   PCI       Card                VRAM      Role         UUID prefix / CUDA idx   #
-#   01:00.0   RTX 5060 Ti         16 GiB    compute      57bbb375  / CUDA 1       #
-#   02:00.0   RTX 3090            24 GiB    desktop/CPEG 93ab52e5  / CUDA 0       #
-#                                                                                 #
-#   The 3090 is the display card (kwin/compositor on it, ~0.6-0.7 GiB). For the   #
-#   -sm tensor TP pair put the 3090 FIRST (CUDA0/--main-gpu 0) and bias           #
-#   --tensor-split toward it so it carries most weights + the larger KV share.    #
-#   Any entry still naming d64df8cf or af5bd53f is stale and will fail to load.   #
-# ############################################################################## #
+##################################################################################
+# GPU TOPOLOGY (3 GPUs, 56 GB VRAM total; updated 2026-09-08)                    #
+#   RTX 5070 Ti (d64df8cf, 16 GiB) is back in the box (2026-09-08).              #
+#   The ZOTAC 5060 Ti (af5bd53f, x4 M.2) is STILL not installed. The             #
+#   three cards present are below. Pin bandwidth-sensitive (-sm tensor)          #
+#   entries by UUID (fastest-first CUDA order = index order).                    #
+#                                                                                #
+#   PCI       Card                VRAM      Role         UUID prefix             #
+#   01:00.0   RTX 5060 Ti         16 GiB    compute      57bbb375                #
+#   02:00.0   RTX 3090            24 GiB    desktop/CPEG 93ab52e5                #
+#   03:00.0   RTX 5070 Ti         16 GiB    compute      d64df8cf                #
+#                                                                                #
+#   The 3090 is the display card (kwin/compositor on it, ~0.6-0.7 GiB). For      #
+#   the -sm tensor TP pair put the 3090 FIRST (CUDA0/--main-gpu 0) and bias      #
+#   --tensor-split toward it so it carries most weights + the larger KV share.   #
+#   2-card entries pairing d64df8cf with the 3090 (or the 5060 Ti) are valid.    #
+#   Any entry still naming af5bd53f (ZOTAC) is stale and will fail to load.      #
+##################################################################################
 
 preload:
   # Large GPU models are loaded on demand so whole-machine models such as
@@ -353,16 +359,19 @@ models:
 
     # Qwen3.8-Flash-Next UD-IQ4_XS (added 2026-08-26): 180B total / 6B active, with
     # 51B n-gram embeddings. The three GGUF shards live on /mnt/models (not the usual
-    # /mnt/shared/models). Uses official llama.cpp b10775 (server-cuda13-b10775) with --fit to
+    # /mnt/shared/models). Uses official llama.cpp mainline (server-cuda13) with --fit to
     # place the active MoE layers across all three GPUs; the large embedding table and
     # context KV stay host-memory/mmap-backed, so context scales to ~196K (verified
     # 2026-08-28). Do not preload this model alongside the resident models.
+    # Re-pinned 2026-09-08 to the current 3-GPU set (5070 Ti d64df8cf, 5060 Ti
+    # 57bbb375, 3090 93ab52e5) after the ZOTAC (af5bd53f) it used to pin returned-less;
+    # validated: loads healthy at -c 196608, ~51 GiB VRAM across the three cards.
   Qwen3.8-Flash-Next-UD-IQ4_XS:
     cmd: |
       docker run --rm --name qwen38-flash-next --runtime nvidia --ipc=host
-      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
       -p ${PORT}:8080 -v /mnt/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b10775
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
       --fit on
       --device CUDA0,CUDA1,CUDA2
@@ -409,7 +418,7 @@ models:
     cmd: |
       docker run --rm --name qwen38-flash-mtp --runtime nvidia --ipc=host
       -e LLAMA_ATTN_ROT_DISABLE=1
-      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
       -p ${PORT}:8080 -v /mnt/models:/models
       --entrypoint /app/llama-server local/llama-swap:cuda-mtp-qwen4exp
       -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
@@ -450,9 +459,9 @@ models:
   Qwen3.8-Flash-Next-UD-IQ4_XS-explore:
     cmd: |
       docker run --rm --name qwen38-flash-next-explore --runtime nvidia --ipc=host
-      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
       -p ${PORT}:8080 -v /mnt/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b10775
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.8-Flash-Next-UD-IQ4_XS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
       --fit on
       --device CUDA0,CUDA1,CUDA2
@@ -630,20 +639,26 @@ models:
     cmd: |
       docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
-      # GPU re-pin for the post-rebuild topology (2026-09-06): the old "MSI 5060 Ti
-      # + Palit 5070 Ti" pair is gone (5070 Ti d64df8cf and ZOTAC af5bd53f no longer
-      # present). Machine now has an RTX 3090 (93ab52e5, 24 GiB, CPU PEG @ 02:00.0,
-      # = desktop/display card) + the 5060 Ti (57bbb375, 16 GiB @ 01:00.0).
-      # CUDA0 = 3090 (biggest card, --main-gpu 0), CUDA1 = 5060 Ti. tensor-split is
-      # weighted toward the 3090 so it holds most of the weights AND its (larger)
-      # share of the unified KV pool; -c is at the 262144 native ceiling to spend
-      # the 3090's spare VRAM on KV.
-      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      # GPU re-pin (2026-09-08): the 5070 Ti (d64df8cf, 16 GiB @ 03:00.0) is back in
+      # the box, so this pair moves OFF the 5060 Ti (57bbb375, 16 GiB @ 01:00.0) onto
+      # the 5070 Ti. Machine now has three cards: 3090 (93ab52e5, 24 GiB, display @
+      # 02:00.0) + 5060 Ti (57bbb375 @ 01:00.0) + 5070 Ti (d64df8cf @ 03:00.0); this
+      # model runs on the 3090 + 5070 Ti. Both candidate secondary cards are 16 GiB,
+      # so the split balance with the 3090 carries over unchanged. CUDA0 = 3090
+      # (--main-gpu 0), CUDA1 = 5070 Ti. tensor-split is weighted toward the 3090 so
+      # it holds most of the weights AND its (larger) share of the unified KV pool;
+      # -c is at the 262144 native ceiling to spend the 3090's spare VRAM on KV.
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      # 2026-09-07: MTP is now in mainline; moved off the mostlygeek bundled image (where MTP
+      # was first available) onto the official ggml-org main image. Per repo policy we do NOT
+      # pin builds - this tracks the latest mainline CUDA13 tag (docker pull to advance).
+      # Verified on the 3090+5060Ti at 262K under production settings: MTP decode ~67->~80 t/s
+      # (novel prose) / ~82->~97 t/s (code), ~+18% vs the old bundled image.
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.8-27B-UD-IQ4_XS.gguf
       --mmproj /models/qwen3.8-mmproj-BF16.gguf
 
@@ -652,7 +667,7 @@ models:
       --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
 
       -ngl 99
-      --flash-attn off
+      --flash-attn on
       -sm tensor
       --fit off
 
@@ -667,21 +682,24 @@ models:
       -b 2048
       # 2-slot unified shared KV pool: two slots share one pool on the fast TP pair;
       # idle slots cost ~0. -c is the TOTAL pool (KV allocated up front, split across
-      # the two TP ranks). At the 262144 native ceiling with the 3090-biased split
-      # the big card holds most weights + the larger KV share. NOTE: the Meta() split
-      # ratio is a SHARP threshold -- if CUDA1 (5060 Ti, 16 GiB) OOMs at load, ease
-      # the ratio up toward 1.00,0.60; if the 3090 (CUDA0) shows large idle headroom
-      # after load, push it down to give it even more weights/KV.
+      # the two TP ranks). Now at an EVEN split both ranks hold ~equal weights AND ~equal
+      # KV. NOTE: the Meta() split ratio is a SHARP threshold -- the 5070 Ti has only
+      # 16 GiB vs the 3090's 24 GiB, so if CUDA1 (5070 Ti) OOMs at load at this split,
+      # pull the ratio back toward the 3090 (e.g. 1.00,0.70); if the 3090 (CUDA0) shows
+      # large idle headroom after load, it can take even more weights/KV.
       -c 262144
       -ctk q8_0
       -ctv q8_0
       # --kv-unified
       # --kv-unified-per-slot 262144
       --main-gpu 0
-      # Weighted toward the 3090 (24 GiB, CUDA0/display) over the 5060 Ti (16 GiB,
-      # CUDA1). 1.00,0.50 -> ~2/3 of the weights on the 3090. Starting probe -- tune
-      # against the actual per-GPU load after a test load (see note above).
-      --tensor-split 1.00,0.50
+      # Even split (2026-09-08): balanced so neither card is the serial bottleneck -- at
+      # 1.00,0.50 the 3090 did ~2/3 of the transformer work and capped decode throughput
+      # (moving to the 5070 Ti at the old ratio gave no speedup). Both ranks now do ~equal
+      # work. WATCH: the 5070 Ti is only 16 GiB vs the 3090's 24 GiB, so an even split puts
+      # ~half the weights AND ~half the unified KV pool on the 5070; if it OOMs at load at
+      # -c 262144, pull the ratio back toward the 3090 (e.g. 1.00,0.70) to trade load for fit.
+      --tensor-split 1.00,1.00
       # -np 2
       -ub 512
       --temp 1.0
@@ -713,8 +731,8 @@ models:
     # context, sampling, and ngram-mod settings as its MTP sibling; only the draft
     # mechanism/model and draft width differ. Start at n_max 4: the PR validation
     # found it best at 32K context versus width 7. The mostlygeek image installed on
-    # the mostlygeek image on this host predates DFlash2; use the pinned official
-    # server-cuda13-b10775 rather than silently testing old code.
+    # the mostlygeek bundled image on this host predates DFlash2; use the official mainline
+    # server-cuda13 image (DFlash2 is now in main release), not a stale bundle.
     #
     # DFlash2 cannot currently run with `-sm tensor`: upstream issue #27819 exactly
     # reproduces GGML_ASSERT(src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0) on startup.
@@ -730,7 +748,7 @@ models:
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b10775
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.8-27B-UD-IQ4_XS.gguf
       -md /models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf
       --mmproj /models/qwen3.8-mmproj-BF16.gguf
@@ -792,7 +810,7 @@ models:
     cmd: |
       docker run --rm --name laguna-mainline --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13-b10775
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Laguna-S-2.1-UD-IQ4_XS-00001-of-00003.gguf
 
       # Unsloth's fixed external chat template (same file the fork entry uses).
@@ -849,7 +867,7 @@ models:
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/models:/models
       --entrypoint /app/llama-server
-      ghcr.io/ggml-org/llama.cpp:server-cuda13-b10775
+      ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
       -md /models/muse-glimmer/dflash-kquant.gguf
       -ngld 99
@@ -1164,7 +1182,7 @@ models:
       docker run --rm --name dsv4f-mtp --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /mnt/models:/models
       --entrypoint /app/llama-server
-      ghcr.io/ggml-org/llama.cpp:server-cuda13-b10775
+      ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/deepseek-v4-flash/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
       -md /models/deepseek-v4-flash/DeepSeek-V4-Flash-MTP-Q8_0.gguf
       --jinja
@@ -1219,7 +1237,7 @@ models:
       docker run --rm --name dsv4f-dspark --runtime nvidia --cap-add SYS_ADMIN
       -p ${PORT}:8080 -v /mnt/models:/models
       --entrypoint /app/llama-server
-      ghcr.io/ggml-org/llama.cpp:server-cuda13-b10775
+      ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/deepseek-v4-flash/DeepSeek-V4-Flash-0731-UD-IQ2_M-00001-of-00003.gguf
       --model-draft /models/deepseek-v4-flash/DeepseekV4-Flash-20260731-DSpark.gguf
       --jinja
