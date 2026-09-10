@@ -4,3 +4,17 @@
 127.0.0.1 - - [05/Sep/2026 21:14:23] "GET /favicon.ico HTTP/1.1" 404 -
 127.0.0.1 - - [05/Sep/2026 21:17:42] "GET / HTTP/1.1" 200 -
 127.0.0.1 - - [05/Sep/2026 21:23:28] "GET / HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "/home/jim/llama-swap/./profile_switcher.py", line 24, in <module>
+    if __name__ == '__main__': ThreadingHTTPServer(('127.0.0.1',8041),App).serve_forever()
+                               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socketserver.py", line 457, in __init__
+    self.server_bind()
+    ~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/server.py", line 148, in server_bind
+    socketserver.TCPServer.server_bind(self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/socketserver.py", line 478, in server_bind
+    self.socket.bind(self.server_address)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 98] Address already in use

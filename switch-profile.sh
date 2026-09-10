@@ -6,12 +6,13 @@ NEED_GEMMA=1
 case "$PROFILE" in
 27b) WORKLOAD=Qwen3.8-27B-UD-IQ4_XS-MTP-TP ;;
 dflash2) WORKLOAD=Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP ;;
+q6) WORKLOAD=Qwen3.8-27B-UD-Q6_K_M ;;
 flash)
 	WORKLOAD=Qwen3.8-Flash-Next-UD-IQ4_XS
 	NEED_GEMMA=0
 	;;
 *)
-	echo "Usage: $0 {27b|dflash2|flash}" >&2
+	echo "Usage: $0 {27b|dflash2|q6|flash}" >&2
 	exit 64
 	;;
 esac

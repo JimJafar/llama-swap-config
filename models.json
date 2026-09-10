@@ -125,7 +125,7 @@
           "input": [
             "text"
           ],
-          "contextWindow": 120000,
+          "contextWindow": 262144,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -152,7 +152,7 @@
           "input": [
             "text"
           ],
-          "contextWindow": 245760,
+          "contextWindow": 262144,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -325,6 +325,13 @@
           }
         },
         {
+          "id": "s1-mini",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 8192
+        },
+        {
           "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-instruct",
           "input": [
             "text"
@@ -389,7 +396,7 @@
           "input": [
             "text"
           ],
-          "contextWindow": 120000,
+          "contextWindow": 262144,
           "reasoning": false,
           "name": "Qwen3.8-27B-UD-Q6_K_M (instruct)",
           "samplingParams": {
@@ -409,7 +416,7 @@
           "input": [
             "text"
           ],
-          "contextWindow": 245760,
+          "contextWindow": 262144,
           "reasoning": false,
           "name": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP (instruct)",
           "samplingParams": {

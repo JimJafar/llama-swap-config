@@ -1,15 +1,3 @@
-# ############################################################################## #
-# EDIT WORKFLOW -- run this after EVERY set of edits to this file, before you    #
-# consider the job finished:                                                     #
-#   1. python3 ./sync-models.py   # regenerates models.json from config.yaml and  #
-#                                 # copies the result to ~/.pi/agent/models.json  #
-#   2. commit + push              # remote: JimJafar/llama-swap-config, branch main #
-# WHY: models.json silently drifts from config.yaml if it is not regenerated, and #
-# an uncommitted/unpushed edit is a change that will be lost or made twice.       #
-# ORDER: run sync-models.py AFTER the config edits (it reads this file), never    #
-# before -- otherwise you sync the previous state.                                #
-# ############################################################################## #
-
 # llama-swap runs as a host binary (llama-swap-bin AUR) and launches each model
 # as a docker container. llama.cpp models use the bundled mostlygeek image with
 # the entrypoint overridden to /app/llama-server; the vLLM model uses the vllm
@@ -386,16 +374,6 @@ models:
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
       --fit on
-      # 2026-09-10 (MEASURED): with --fit-target the fit now uses ALL THREE GPUs --
-      # ~50.1 GiB total at -c 196608, leaving 5060 Ti 977 MiB / 3090 2334 MiB /
-      # 5070 Ti 1241 MiB free. Device order = 5070 Ti (CUDA0), 5060 Ti (CUDA1),
-      # 3090 (CUDA2). Lowering the 3090 target to 512 changed nothing (used
-      # 21737 -> 21757 MiB): --fit is LAYER-GRANULAR, so the next layer/experts do
-      # not fit and it keeps ~2.3 GiB idle on the 3090 regardless. 1024 is therefore
-      # the floor that GUARANTEES the requested >=1 GiB headroom on the 3090 (which
-      # also carries the desktop). To consume the remaining 3090 slack you would
-      # have to drop --fit and place layers by hand.
-      --fit-target 1024,1024,1024
       --device CUDA0,CUDA1,CUDA2
       --threads 20
       --jinja
@@ -517,19 +495,19 @@ models:
       --port 8080
     cmdStop: docker stop qwen38-flash-next-explore
 
-    # *** 2026-09-10 CURRENT STATE = the 180K QUICK-TEST PROFILE (authoritative; the
-    # historical notes below are STALE). Runs on the 3090 (93ab52e5, 24 GiB, CUDA0 /
-    # --main-gpu) + 5070 Ti (d64df8cf, 16 GiB); -c 180000, --tensor-split 1.00,0.80.
-    # MEASURED at 180K/0.80: 3090 ~19.9/24.6 GiB used (~4.1 GiB free), 5070 Ti ~14.3/16.3
-    # GiB used (~1.55 GiB free). MTP + ngram unchanged. Weights 22019 MiB + mmproj 889 +
-    # MTP draft 1307.
-    #
-    # TO RESTORE THE FULL-CONTEXT (262144) PROFILE: copy
-    #   config.yaml.snap-q6-262K-20260910-115747
-    # back over config.yaml -- that snapshot holds -c 262144 with --tensor-split 1.00,0.65.
-    # At 262144 the 5070 Ti OOMs at 1.00,0.80, so 0.65 (weighted to the 3090) is required;
-    # it measured 3090 655 MiB / 5070 Ti 969 MiB free. The Meta() split is a SHARP STEP, so
-    # ~655 MiB is the most 3090 headroom available at 262K (cut -ub 512->256 for more).
+    # *** 2026-09-09 CURRENT STATE (authoritative; the historical notes below are STALE):
+    # Runs on the 3090 (93ab52e5, 24 GiB, CUDA0 / --main-gpu) + 5070 Ti (d64df8cf, 16 GiB).
+    # Context raised 180000 -> 262144 (native ceiling); MTP + ngram unchanged.
+    # Weights 22019 MiB + mmproj 889 + MTP draft 1307.
+    # At 262144 the 5070 Ti OOM'd at split 1.00,0.80 (peaked 15578 MiB used / 303 free), so
+    # the split was weighted toward the 3090. FINAL split 1.00,0.65 (r=0.606), MEASURED:
+    #   3090    23436/24576 MiB used -> 655 MiB free
+    #   5070 Ti 14912/16303 MiB used -> 969 MiB free
+    # The Meta() split is a SHARP STEP (quantized tensor rows): 0.62 -> 0.65 moved only
+    # ~40 MiB, and the next step (0.80) overflows the 5070 Ti -- so ~655 MiB is the most
+    # 3090 headroom the split can give at 262K. For more, cut -ub 512 -> 256 (frees compute
+    # buffers on BOTH ranks at a small prefill/PP cost) or drop -c a little. Decode is slower
+    # than the 180K/1.00,0.80 profile (heavier 3090 weighting) but reaches full context.
     #
     # Qwen3.8-27B Q6_K (added 2026-08-14): dense 27B, UD Q6_K quant (23.09 GB; dynamic
     # layout mixes Q8_0/Q5_K/Q4_K blocks + a few IQ1_S). Hybrid arch (Gated DeltaNet +
@@ -587,21 +565,24 @@ models:
       --fit off
 
       -b 2048
-      # 2026-09-10: RESTORED to 180000 for the operator's quick test (this is the profile
-      # that ran "very nearly as fast as Q4_XS" at split 1.00,0.80). MEASURED then: 3090
-      # ~19.9/24.6 GiB used (~4.1 GiB free), 5070 Ti ~14.3/16.3 GiB used (~1.55 GiB free).
-      # The full-context profile is -c 262144 / split 1.00,0.65, preserved as
-      # config.yaml.snap-q6-262K-20260910-115747 (at 262144 the 5070 Ti OOMs at 0.80).
-      -c 180000
+      # 2026-09-09 (MEASURED @ -c 180000, split 1.00,0.80): 3090 ~19.9/24.6 GiB used, 5070 Ti
+      # ~14.3/16.3 GiB used (~1.55 GiB free) = the 5070 is the binding wall. RAISED to the
+      # 262144 native ceiling: at split 1.00,0.80 the 5070 Ti OOM'd (peaked 15578 MiB used,
+      # 303 MiB free, then upstream exited). Weights are 22019 MiB (Q6_K_M) + 889 mmproj +
+      # 1307 MTP draft; 262K needs ~+2.9 GiB more total KV than 180K, so the split was
+      # rebalanced toward the 3090 (see --tensor-split below).
+      -c 262144
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
-      # 1.00,0.80 (restored 2026-09-10): the 180K balance point -- an even-ish split keeps
-      # both ranks doing ~equal TP work (fastest decode), which is what made this profile
-      # "very nearly as fast as Q4_XS". NOTE 0.80 CANNOT hold 262144 -- the 5070 Ti OOMs at
-      # that context; the 262K profile uses 1.00,0.65 (config.yaml.snap-q6-262K-20260910-115747).
-      # Meta() split is a sharp step, not a dial.
-      --tensor-split 1.00,0.80
+      # 1.00,0.65 (2026-09-09): weighted toward the 3090 (CUDA0, 24 GiB) so 262144 fits.
+      # At 1.00,0.80 the 5070 Ti could not hold its ~44% share of the larger KV pool and the
+      # load exited (see -c note). MEASURED at 1.00,0.62: 3090 615 MiB free / 5070 Ti 1009 MiB
+      # free; the 3090 ran tighter than the wanted ~1 GiB (it also carries mmproj + draft +
+      # desktop), so this nudges ~0.4 GiB back onto the 5070. Heavier weighting than 0.80
+      # makes the 3090 more of the decode bottleneck (slower), but the 16 GiB 5070 cannot
+      # reach 262K at 0.80. Meta() split is a sharp threshold -- re-measure at load.
+      --tensor-split 1.00,0.65
       -np 1
       -ub 512
 
@@ -1528,13 +1509,7 @@ groups:
     swap: true
     exclusive: false
     persistent: false
-    # Qwen3.8-27B-UD-Q6_K_M added 2026-09-10: it is pinned to the SAME card pair
-    # (3090 + 5070 Ti) as the Flash-Next / TP entries, so it must swap with them too.
-    # Without this it stayed resident and Flash-Next's --fit only saw the 5060 Ti free
-    # (Q6 held the other two cards), so Flash-Next ran on ~1 GPU. Now requesting any
-    # member evicts the others; genuine resident groups (gemma/dictation) are untouched.
     members:
-      - Qwen3.8-27B-UD-Q6_K_M
       - Qwen3.8-27B-UD-IQ4_XS-MTP-TP
       - Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP
       - Qwen3.8-Flash-Next-UD-IQ4_XS
