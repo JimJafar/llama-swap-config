@@ -6,6 +6,8 @@
 - contextWindow = taken from the model's `-c N`, `--fit-ctx N` or
   vLLM `--max-model-len N` flag in its cmd (falls back to whatever the
   current models.json says, then to DEFAULT_CONTEXT_WINDOW).
+- maxTokens = MAX_TOKENS_RATIO (95%) of contextWindow, recomputed on every run.
+  pi defaults this to 16384, which truncates long-thinking models mid-reasoning.
 - Curated per-model fields (reasoning, input, thinkingLevelMap, compat,
   thinkingFormat, ...) are preserved from the existing models.json for
   ids it already has; brand-new ids get a minimal entry
@@ -50,6 +52,13 @@ EXCLUDES = {
 }
 
 DEFAULT_CONTEXT_WINDOW = 32768
+
+# pi defaults each model's maxTokens (max OUTPUT tokens, sent as the request's
+# max_completion_tokens) to 16384, which truncates heavy thinking models such as
+# Qwen3.8 mid-reasoning. Set it to this fraction of the model's context window
+# instead, so the output cap is effectively removed. llama.cpp clamps n_predict
+# to the space actually left after the prompt, so a value this high is safe.
+MAX_TOKENS_RATIO = 0.95
 
 # Instruct-mode variants: for any model id containing INSTRUCT_ID_MARKER, also
 # emit "<id>-instruct" with this sampling recipe (Qwen3.8 model-card non-thinking
@@ -186,15 +195,36 @@ PROVIDER = {
 
 
 def context_window(cmd: str) -> int | None:
+    # `cmd` is a YAML block scalar and commonly contains shell comment lines
+    # (`# ...`) that mention flags -- e.g. a note like "the 262K profile is
+    # -c 262144" sitting ABOVE the real `-c 180000`. Drop comment lines before
+    # matching, so only real flags are parsed.
+    body = "\n".join(
+        line for line in cmd.splitlines() if not line.lstrip().startswith("#")
+    )
     try:
         m = (
-            re.search(r"(?:^|\s)-c\s+(\d+)", cmd)
-            or re.search(r"--fit-ctx\s+(\d+)", cmd)
-            or re.search(r"--max-model-len\s+(\d+)", cmd)
+            re.search(r"(?:^|\s)-c\s+(\d+)", body)
+            or re.search(r"--fit-ctx\s+(\d+)", body)
+            or re.search(r"--max-model-len\s+(\d+)", body)
         )
         return int(m.group(1)) if m else None
     except (re.error, ValueError):
         return None
+
+
+def max_tokens(ctx) -> int:
+    """Max OUTPUT tokens for models.json = MAX_TOKENS_RATIO of the context window.
+
+    pi defaults maxTokens to 16384, which truncates long-thinking models; a value
+    near the context window effectively removes the cap (llama.cpp clamps n_predict
+    to the space left after the prompt). Falls back to the default window when ctx
+    is missing or not a usable integer (e.g. a hand-edited models.json).
+    """
+    try:
+        return int(int(ctx) * MAX_TOKENS_RATIO)
+    except (TypeError, ValueError):
+        return int(DEFAULT_CONTEXT_WINDOW * MAX_TOKENS_RATIO)
 
 
 def main() -> None:
@@ -219,6 +249,7 @@ def main() -> None:
         keep["id"] = name
         ctx = context_window(entry.get("cmd", "")) or keep.get("contextWindow") or DEFAULT_CONTEXT_WINDOW
         keep["contextWindow"] = ctx
+        keep["maxTokens"] = max_tokens(ctx)
         new_models.append(keep)
 
     # Apply per-family thinking/effort wiring to the base entries (before the
@@ -261,6 +292,9 @@ def main() -> None:
     changed_ctx = [m["id"] for m in new_models
                    if m["id"] in old_ids and m["contextWindow"] != cur_models[m["id"]].get("contextWindow")]
     print("ctxWindow changes:", changed_ctx or "none")
+    changed_max = [m["id"] for m in new_models
+                   if m["id"] in old_ids and m["maxTokens"] != cur_models[m["id"]].get("maxTokens")]
+    print("maxTokens changes:", changed_max or "none")
 
     if dry_run:
         print("(dry run — nothing written)")

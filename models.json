@@ -20,7 +20,8 @@
                 "$var": "thinking.enabled"
               }
             }
-          }
+          },
+          "maxTokens": 121600
         },
         {
           "id": "Qwen3.5-9B-Q4",
@@ -37,7 +38,8 @@
                 "$var": "thinking.enabled"
               }
             }
-          }
+          },
+          "maxTokens": 237500
         },
         {
           "id": "Qwen3.8-Flash-Next-UD-IQ4_XS",
@@ -64,7 +66,8 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 186777
         },
         {
           "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP",
@@ -91,7 +94,8 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 186777
         },
         {
           "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore",
@@ -118,14 +122,15 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 186777
         },
         {
           "id": "Qwen3.8-27B-UD-Q6_K_M",
           "input": [
             "text"
           ],
-          "contextWindow": 262144,
+          "contextWindow": 180000,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -145,7 +150,8 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 171000
         },
         {
           "id": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP",
@@ -172,7 +178,8 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 249036
         },
         {
           "id": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP",
@@ -199,7 +206,8 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 249036
         },
         {
           "id": "laguna-s-2.1-mainline",
@@ -216,7 +224,8 @@
                 "$var": "thinking.enabled"
               }
             }
-          }
+          },
+          "maxTokens": 249036
         },
         {
           "id": "muse-glimmer-30B-dflash-vision",
@@ -241,7 +250,8 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 124518
         },
         {
           "id": "gemma-4-31B-Q4-MTP",
@@ -253,7 +263,8 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "off": null
-          }
+          },
+          "maxTokens": 71759
         },
         {
           "id": "gemma-4-26B-MoE-MTP",
@@ -261,14 +272,16 @@
             "text",
             "image"
           ],
-          "contextWindow": 256000
+          "contextWindow": 256000,
+          "maxTokens": 243200
         },
         {
           "id": "gemma-4-E4B-MTP",
           "input": [
             "text"
           ],
-          "contextWindow": 262144
+          "contextWindow": 262144,
+          "maxTokens": 249036
         },
         {
           "id": "deepseek-v4-flash-IQ2-MTP-131K",
@@ -295,7 +308,8 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 124518
         },
         {
           "id": "deepseek-v4-flash-IQ2-dspark-131K",
@@ -322,14 +336,16 @@
                 "$var": "thinking.effort"
               }
             }
-          }
+          },
+          "maxTokens": 124518
         },
         {
           "id": "s1-mini",
           "input": [
             "text"
           ],
-          "contextWindow": 8192
+          "contextWindow": 8192,
+          "maxTokens": 7782
         },
         {
           "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-instruct",
@@ -338,6 +354,7 @@
           ],
           "contextWindow": 196608,
           "reasoning": false,
+          "maxTokens": 186777,
           "name": "Qwen3.8-Flash-Next-UD-IQ4_XS (instruct)",
           "samplingParams": {
             "temperature": 0.7,
@@ -358,6 +375,7 @@
           ],
           "contextWindow": 196608,
           "reasoning": false,
+          "maxTokens": 186777,
           "name": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP (instruct)",
           "samplingParams": {
             "temperature": 0.7,
@@ -378,6 +396,7 @@
           ],
           "contextWindow": 196608,
           "reasoning": false,
+          "maxTokens": 186777,
           "name": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore (instruct)",
           "samplingParams": {
             "temperature": 0.7,
@@ -396,8 +415,9 @@
           "input": [
             "text"
           ],
-          "contextWindow": 262144,
+          "contextWindow": 180000,
           "reasoning": false,
+          "maxTokens": 171000,
           "name": "Qwen3.8-27B-UD-Q6_K_M (instruct)",
           "samplingParams": {
             "temperature": 0.7,
@@ -418,6 +438,7 @@
           ],
           "contextWindow": 262144,
           "reasoning": false,
+          "maxTokens": 249036,
           "name": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP (instruct)",
           "samplingParams": {
             "temperature": 0.7,
@@ -438,6 +459,7 @@
           ],
           "contextWindow": 262144,
           "reasoning": false,
+          "maxTokens": 249036,
           "name": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP (instruct)",
           "samplingParams": {
             "temperature": 0.7,
