@@ -2,3 +2,7 @@
 vendor/
 
 __pycache__/
+
+# Runtime RSS/VRAM log: rss-monitor.sh appends on every run, so a tracked
+# copy is permanently dirty and buries real changes in git status.
+memory-monitor.log
