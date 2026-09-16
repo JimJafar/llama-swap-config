@@ -130,7 +130,7 @@
           "input": [
             "text"
           ],
-          "contextWindow": 180000,
+          "contextWindow": 240000,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -151,7 +151,7 @@
               }
             }
           },
-          "maxTokens": 171000
+          "maxTokens": 228000
         },
         {
           "id": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP",
@@ -284,68 +284,20 @@
           "maxTokens": 249036
         },
         {
-          "id": "deepseek-v4-flash-IQ2-MTP-131K",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 131072,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": null,
-            "high": "high",
-            "xhigh": "max",
-            "max": "max"
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          },
-          "maxTokens": 124518
-        },
-        {
-          "id": "deepseek-v4-flash-IQ2-dspark-131K",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 131072,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": null,
-            "high": "high",
-            "xhigh": "max",
-            "max": "max"
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          },
-          "maxTokens": 124518
-        },
-        {
           "id": "s1-mini",
           "input": [
             "text"
           ],
           "contextWindow": 8192,
           "maxTokens": 7782
+        },
+        {
+          "id": "chatterbox-turbo",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 32768,
+          "maxTokens": 31129
         },
         {
           "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-instruct",
@@ -415,9 +367,9 @@
           "input": [
             "text"
           ],
-          "contextWindow": 180000,
+          "contextWindow": 240000,
           "reasoning": false,
-          "maxTokens": 171000,
+          "maxTokens": 228000,
           "name": "Qwen3.8-27B-UD-Q6_K_M (instruct)",
           "samplingParams": {
             "temperature": 0.7,

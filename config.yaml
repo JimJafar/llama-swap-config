@@ -390,14 +390,22 @@ models:
       --fit-target 1024,1024,1024
       --device CUDA0,CUDA1,CUDA2
       --threads 20
-      --jinja
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
       --flash-attn on
       -c 196608
-      -b 512
-      -ub 256
+      # 2026-09-15 (MEASURED): -b 2048 -ub 512 beats the previous -b 512 -ub 256 on prefill
+      # (+21% at 8k: 527->640 t/s; +22% at 32k: 483->590 t/s, TTFT 68.0->55.5 s; +20% at 98k)
+      # with no decode cost. -ub 1024/2048 improve prefill slightly but collapse tg (33/24 t/s),
+      # so -ub 512 is the ceiling. Loads healthy at -c 196608 (KV is preallocated at load).
+      -b 2048
+      -ub 512
       -ctk q8_0
       -ctv q8_0
       -np 1
+
+      # engrams on ssd
+      --load-mode none
 
       # draft speculation - ngram
       # Official latest llama.cpp (server-cuda13, build >=10666) -- Qwen3.8-Flash-Next
@@ -443,8 +451,10 @@ models:
       --jinja
       --flash-attn on
       -c 196608
-      -b 512
-      -ub 256
+      # 2026-09-15: -b 2048 -ub 512 to match the measured main-entry win. NOTE: this entry is
+      # still the unvalidated MTP test (patched image); MTP is not supported for qwen4exp.
+      -b 2048
+      -ub 512
       -ctk q8_0
       -ctv q8_0
       -np 1
@@ -483,8 +493,10 @@ models:
       --jinja
       --flash-attn on
       -c 196608
-      -b 512
-      -ub 256
+      # 2026-09-15: -b 2048 -ub 512, matched to the main entry. Fits at -c 196608 with ~1 GiB
+      # per-card headroom under --fit-target 1024,1024,1024.
+      -b 2048
+      -ub 512
       -np 1
 
       # Explorer instance for the token-continuation browser: reasoning is OFF so that
@@ -584,7 +596,7 @@ models:
       # ~19.9/24.6 GiB used (~4.1 GiB free), 5070 Ti ~14.3/16.3 GiB used (~1.55 GiB free).
       # The full-context profile is -c 262144 / split 1.00,0.65, preserved as
       # config.yaml.snap-q6-262K-20260910-115747 (at 262144 the 5070 Ti OOMs at 0.80).
-      -c 180000
+      -c 240000
       -ctk q8_0
       -ctv q8_0
       --main-gpu 0
