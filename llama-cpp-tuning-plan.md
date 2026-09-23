@@ -174,7 +174,7 @@ Do not add `GGML_CUDA_P2P=1` casually. The host has a history of multi-GPU stabi
 
 ### P2 — Fit-headroom and micro-batch sweep for Qwen3.6-35B
 
-`qwen3.6-35B-Q4` uses `--fit-target 256` and `-b 2048 -ub 2048`. The guide's persistent-server floor is 512 MiB, and a full-size micro-batch maximises the compute buffer.
+`Q3.6-35B-Q4` uses `--fit-target 256` and `-b 2048 -ub 2048`. The guide's persistent-server floor is 512 MiB, and a full-size micro-batch maximises the compute buffer.
 
 Run this small matrix at the configured 128K context:
 

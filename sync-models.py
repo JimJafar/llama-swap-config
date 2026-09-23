@@ -14,16 +14,11 @@
   ({id, input: ["text"], contextWindow}) — add their reasoning/thinking
   fields by hand once.
 - Models removed from config.yaml (or marked unlisted) drop out.
-- For every model whose id contains the INSTRUCT_ID_MARKER, an additional
-  "<id>-instruct" variant is emitted with the INSTRUCT_SAMPLING recipe
-  (model-card instruct-mode sampling, reasoning off). The variant routes to
-  the SAME llama-swap upstream via the model's `aliases` in config.yaml;
-  without that alias, llama-swap 404s ("no router for requested model").
 - THINKING_WIRING: per-family pi thinking/effort wiring (reasoning,
   thinkingLevelMap, compat.chatTemplateKwargs with $var mappings) applied to
   every base model whose id matches the family marker. This is what lets pi
   control thinking on/off + effort per request instead of leaving it to the
-  server's baked flags. The -instruct variants strip all of it (fixed off).
+  server's baked flags.
 
 Then copies the result to ~/.pi/agent/models.json.
 
@@ -60,37 +55,10 @@ DEFAULT_CONTEXT_WINDOW = 32768
 # to the space actually left after the prompt, so a value this high is safe.
 MAX_TOKENS_RATIO = 0.95
 
-# Instruct-mode variants: for any model id containing INSTRUCT_ID_MARKER, also
-# emit "<id>-instruct" with this sampling recipe (Qwen3.8 model-card non-thinking
-# mode). The llama-swap config.yaml entry must alias the instruct id to the base
-# model (`aliases: ["<id>-instruct"]`) or requests to it 404.
-#
-# chat_template_kwargs.enable_thinking=false is injected here (not via pi's
-# thinkingFormat compat) because pi only sends chat_template_kwargs itself for
-# models with reasoning: true — its thinkingFormat branches are gated on that.
-# With reasoning: false, samplingParams is the only way to force thinking off on
-# every request. llama.cpp merges request chat_template_kwargs per-key over the
-# server's --chat-template-kwargs and ERASES reasoning_effort when
-# enable_thinking is false (tools/server/server-common.cpp), so the base entry's
-# server-side "reasoning on / reasoning_effort medium" defaults are overridden.
-INSTRUCT_ID_MARKER = "Qwen3.8"
-INSTRUCT_ID_SUFFIX = "-instruct"
-INSTRUCT_SAMPLING = {
-    "temperature": 0.7,
-    "top_p": 0.80,
-    "top_k": 20,
-    "min_p": 0.0,
-    "presence_penalty": 1.5,
-    "repetition_penalty": 1.0,
-    # thinking off on every request (see note above)
-    "chat_template_kwargs": {"enable_thinking": False},
-}
-
 # Per-family pi thinking/effort wiring, applied to every base model whose id
 # (lowercased) contains the marker. Overrides reasoning / thinkingLevelMap /
 # compat on the base entry (so hand-curated "off": null maps get replaced by
-# real controls). Only the base entries are wired; the -instruct variants are
-# generated after and strip reasoning controls entirely (fixed off).
+# real controls).
 #
 # Mechanic: thinkingFormat "chat-template" + chatTemplateKwargs with
 # {"$var": "thinking.enabled"} / {"$var": "thinking.effort"} makes pi send
@@ -106,8 +74,12 @@ INSTRUCT_SAMPLING = {
 THINKING_WIRING = [
     # Qwen3.8: full on/off + effort. Template accepts low/medium/high/xhigh
     # (qwen-3_8-improved-chat-template.jinja validates and raises otherwise).
+    # `marker` may be a string OR a list of strings (see the matching loop in
+    # main()). Both conventions are listed because config.yaml was renamed to short
+    # ids on 2026-09-17 (Qwen3.8-* -> Q3.8-*); a marker that silently stops
+    # matching strips pi's thinking controls with NO error at all.
     {
-        "marker": "qwen3.8",
+        "marker": ["q3.8", "qwen3.8"],
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {
@@ -146,7 +118,7 @@ THINKING_WIRING = [
     # enable_thinking but NO reasoning_effort kwarg, so effort levels do
     # nothing server-side. Empty thinkingLevelMap = pi defaults (off allowed).
     {
-        "marker": "qwen3.5",
+        "marker": ["q3.5", "qwen3.5"],
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {},
@@ -159,7 +131,7 @@ THINKING_WIRING = [
         },
     },
     {
-        "marker": "qwen3.6",
+        "marker": ["q3.6", "qwen3.6"],
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {},
@@ -204,9 +176,10 @@ def context_window(cmd: str) -> int | None:
     )
     try:
         m = (
-            re.search(r"(?:^|\s)-c\s+(\d+)", body)
-            or re.search(r"--fit-ctx\s+(\d+)", body)
-            or re.search(r"--max-model-len\s+(\d+)", body)
+            re.search(r"(?:^|\s)-c\s+(\d+)", body)          # llama.cpp
+            or re.search(r"--fit-ctx\s+(\d+)", body)        # llama.cpp --fit floor
+            or re.search(r"--max-model-len\s+(\d+)", body)   # vLLM
+            or re.search(r"--max-seq-len\s+(\d+)", body)     # TabbyAPI / exllamav3
         )
         return int(m.group(1)) if m else None
     except (re.error, ValueError):
@@ -242,42 +215,31 @@ def main() -> None:
     cur_models = {m["id"]: m for m in current["providers"]["marvin"]["models"]}
 
     new_models = []
+    ctx_unparsed = []
     for name, entry in cfg["models"].items():
         if entry.get("unlisted") or name in EXCLUDES:
             continue
         keep = dict(cur_models.get(name, {"id": name, "input": ["text"]}))
         keep["id"] = name
-        ctx = context_window(entry.get("cmd", "")) or keep.get("contextWindow") or DEFAULT_CONTEXT_WINDOW
+        parsed = context_window(entry.get("cmd", ""))
+        if parsed is None:
+            ctx_unparsed.append(name)
+        ctx = parsed or keep.get("contextWindow") or DEFAULT_CONTEXT_WINDOW
         keep["contextWindow"] = ctx
         keep["maxTokens"] = max_tokens(ctx)
         new_models.append(keep)
 
-    # Apply per-family thinking/effort wiring to the base entries (before the
-    # instruct variants are generated, so instructs stay stripped of it).
+    # Apply per-family thinking/effort wiring to the base entries. `marker` is a
+    # substring of the lowercased model id, and may be a list so one family can
+    # carry several naming conventions at once.
     for m in new_models:
         for spec in THINKING_WIRING:
-            if spec["marker"] in m["id"].lower():
+            markers = spec["marker"]
+            if isinstance(markers, str):
+                markers = [markers]
+            if any(mk in m["id"].lower() for mk in markers):
                 m.update(spec["fields"])
                 break
-
-    # Instruct variants: clone the base entry (input/contextWindow/curated fields),
-    # swap the id, and pin the instruct sampling recipe (which forces thinking off
-    # via chat_template_kwargs.enable_thinking=false) + reasoning off. Generated
-    # fresh every run, so the recipe below is the source of truth (hand-edits to an
-    # instruct entry in models.json are overwritten on the next sync). Reasoning
-    # controls are stripped so the fixed-off behavior can't be undone by base wiring.
-    instruct_models = []
-    for m in new_models:
-        if INSTRUCT_ID_MARKER in m["id"]:
-            inst = dict(m)
-            inst["id"] = m["id"] + INSTRUCT_ID_SUFFIX
-            inst["name"] = m["id"] + " (instruct)"
-            inst["samplingParams"] = dict(INSTRUCT_SAMPLING)
-            inst["reasoning"] = False
-            inst.pop("compat", None)
-            inst.pop("thinkingLevelMap", None)
-            instruct_models.append(inst)
-    new_models = new_models + instruct_models
 
     out = {
         "providers": {
@@ -292,6 +254,13 @@ def main() -> None:
     changed_ctx = [m["id"] for m in new_models
                    if m["id"] in old_ids and m["contextWindow"] != cur_models[m["id"]].get("contextWindow")]
     print("ctxWindow changes:", changed_ctx or "none")
+    if ctx_unparsed:
+        # Silence here is dangerous: an unrecognised flag means the context silently falls
+        # back to the EXISTING models.json value (so a changed cmd never propagates) or to
+        # DEFAULT_CONTEXT_WINDOW. That is how the EXL3 entry sat at 32768 for hours while
+        # its cmd said --max-seq-len 262144. Expected for non-chat backends (TTS/ASR).
+        print("WARNING: no context flag recognised in:", sorted(ctx_unparsed),
+              f"-> falling back to existing value / {DEFAULT_CONTEXT_WINDOW}")
     changed_max = [m["id"] for m in new_models
                    if m["id"] in old_ids and m["maxTokens"] != cur_models[m["id"]].get("maxTokens")]
     print("maxTokens changes:", changed_max or "none")

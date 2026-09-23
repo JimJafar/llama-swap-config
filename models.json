@@ -6,11 +6,12 @@
       "apiKey": "llama-swap",
       "models": [
         {
-          "id": "qwen3.6-35B-Q4",
+          "id": "Q3.6-35B-Q4",
           "input": [
             "text"
           ],
           "contextWindow": 128000,
+          "maxTokens": 121600,
           "reasoning": true,
           "thinkingLevelMap": {},
           "compat": {
@@ -20,15 +21,15 @@
                 "$var": "thinking.enabled"
               }
             }
-          },
-          "maxTokens": 121600
+          }
         },
         {
-          "id": "Qwen3.5-9B-Q4",
+          "id": "Q3.5-9B-Q4",
           "input": [
             "text"
           ],
           "contextWindow": 250000,
+          "maxTokens": 237500,
           "reasoning": true,
           "thinkingLevelMap": {},
           "compat": {
@@ -38,15 +39,15 @@
                 "$var": "thinking.enabled"
               }
             }
-          },
-          "maxTokens": 237500
+          }
         },
         {
-          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS",
+          "id": "Q3.8-FN-AC-IQ4XS-MTP",
           "input": [
             "text"
           ],
           "contextWindow": 196608,
+          "maxTokens": 186777,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -66,67 +67,10 @@
                 "$var": "thinking.effort"
               }
             }
-          },
-          "maxTokens": 186777
+          }
         },
         {
-          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 196608,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          },
-          "maxTokens": 186777
-        },
-        {
-          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 196608,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          },
-          "maxTokens": 186777
-        },
-        {
-          "id": "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0",
+          "id": "Q3.8-FN-GSQ-RCO-Q2_0-MTP",
           "input": [
             "text"
           ],
@@ -154,11 +98,12 @@
           }
         },
         {
-          "id": "Qwen3.8-27B-UD-Q6_K_M",
+          "id": "Q3.8-27B-Q6KM",
           "input": [
             "text"
           ],
           "contextWindow": 240000,
+          "maxTokens": 228000,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -178,15 +123,15 @@
                 "$var": "thinking.effort"
               }
             }
-          },
-          "maxTokens": 228000
+          }
         },
         {
-          "id": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP",
+          "id": "Q3.8-27B-IQ4XS",
           "input": [
             "text"
           ],
           "contextWindow": 393216,
+          "maxTokens": 373555,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -206,15 +151,15 @@
                 "$var": "thinking.effort"
               }
             }
-          },
-          "maxTokens": 373555
+          }
         },
         {
-          "id": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP",
+          "id": "Q3.8-27B-IQ4XS-DF2",
           "input": [
             "text"
           ],
           "contextWindow": 262144,
+          "maxTokens": 249036,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -234,8 +179,7 @@
                 "$var": "thinking.effort"
               }
             }
-          },
-          "maxTokens": 249036
+          }
         },
         {
           "id": "laguna-s-2.1-mainline",
@@ -326,153 +270,6 @@
           ],
           "contextWindow": 32768,
           "maxTokens": 31129
-        },
-        {
-          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-instruct",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 196608,
-          "reasoning": false,
-          "maxTokens": 186777,
-          "name": "Qwen3.8-Flash-Next-UD-IQ4_XS (instruct)",
-          "samplingParams": {
-            "temperature": 0.7,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 1.5,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {
-              "enable_thinking": false
-            }
-          }
-        },
-        {
-          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP-instruct",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 196608,
-          "reasoning": false,
-          "maxTokens": 186777,
-          "name": "Qwen3.8-Flash-Next-UD-IQ4_XS-MTP (instruct)",
-          "samplingParams": {
-            "temperature": 0.7,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 1.5,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {
-              "enable_thinking": false
-            }
-          }
-        },
-        {
-          "id": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore-instruct",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 196608,
-          "reasoning": false,
-          "maxTokens": 186777,
-          "name": "Qwen3.8-Flash-Next-UD-IQ4_XS-explore (instruct)",
-          "samplingParams": {
-            "temperature": 0.7,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 1.5,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {
-              "enable_thinking": false
-            }
-          }
-        },
-        {
-          "id": "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-instruct",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 262144,
-          "maxTokens": 249036,
-          "reasoning": false,
-          "name": "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0 (instruct)",
-          "samplingParams": {
-            "temperature": 0.7,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 1.5,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {
-              "enable_thinking": false
-            }
-          }
-        },
-        {
-          "id": "Qwen3.8-27B-UD-Q6_K_M-instruct",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 240000,
-          "reasoning": false,
-          "maxTokens": 228000,
-          "name": "Qwen3.8-27B-UD-Q6_K_M (instruct)",
-          "samplingParams": {
-            "temperature": 0.7,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 1.5,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {
-              "enable_thinking": false
-            }
-          }
-        },
-        {
-          "id": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP-instruct",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 393216,
-          "reasoning": false,
-          "maxTokens": 373555,
-          "name": "Qwen3.8-27B-UD-IQ4_XS-MTP-TP (instruct)",
-          "samplingParams": {
-            "temperature": 0.7,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 1.5,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {
-              "enable_thinking": false
-            }
-          }
-        },
-        {
-          "id": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP-instruct",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 262144,
-          "reasoning": false,
-          "maxTokens": 249036,
-          "name": "Qwen3.8-27B-UD-IQ4_XS-DFlash2-TP (instruct)",
-          "samplingParams": {
-            "temperature": 0.7,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 1.5,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {
-              "enable_thinking": false
-            }
-          }
         }
       ]
     }
