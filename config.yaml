@@ -10,12 +10,12 @@
 # before -- otherwise you sync the previous state.                                #
 # ############################################################################## #
 
-# llama-swap runs as a host binary (llama-swap-bin AUR) and launches each model
-# as a docker container. llama.cpp models use the bundled mostlygeek image with
-# the entrypoint overridden to /app/llama-server; the vLLM model uses the vllm
-# image. ${PORT} is assigned by llama-swap and published from the container; the
-# server inside always listens on its own fixed port. cmdStop stops the named
-# container cleanly on swap so VRAM is freed.
+# llama-swap runs as a host binary (llama-swap-bin AUR). Most model backends run
+# as Docker containers: llama.cpp uses the mostlygeek image with its entrypoint
+# overridden to /app/llama-server, while vLLM uses the vllm image. Q3.8-FN-EXL3
+# is a host TabbyAPI process in an isolated Python venv. ${PORT} is assigned by
+# llama-swap; containers publish it, while host processes bind it directly.
+# cmdStop or default SIGTERM handling stops the backend and frees VRAM.
 #
 # Shared docker flags for llama.cpp models:
 #   --runtime nvidia --cap-add SYS_ADMIN  (matches the previously-working setup)
@@ -447,6 +447,22 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop qwen38-flash-next
+
+    # Qwen3.8-Flash-Next EXL3 via TabbyAPI/ExLlamaV3; tested at 128K/Q8 with
+    # a [20, 13, 14.5] GiB split across 3090, 5070 Ti and MSI 5060 Ti, plus 10
+    # CPU offload: 10 MoE layers. A 130,816-token prompt passed. ZOTAC excluded.
+    # This on-demand profile leaves TabbyAPI's default config unchanged.
+    # Tabby auth is disabled per request; llama-swap has no per-model auth gate.
+    # Its endpoint is the access boundary; Tabby binds loopback and CORS is off.
+  Q3.8-FN-EXL3:
+    checkEndpoint: /health
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: Qwen3.8-Flash-Next-exl3
+    env:
+      - PYTHONUNBUFFERED=1
+      - TABBY_LOG_LEVEL=WARNING
+    # Launcher sets a private umask and runs TabbyAPI in its app directory.
+    cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 131072
 
     # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch
     # qwen4exp/mtp @ 53b1389d0 (its 2026-09-18 merge of upstream master) with a real MTP
@@ -1700,3 +1716,5 @@ groups:
       # Q3.8-FN-GSQ-RCO-Q2_0-MTP added 2026-09-18: same 3-card set, same target, but MTP
       # draft speculation instead of ngram-mod.
       - Q3.8-FN-GSQ-RCO-Q2_0-MTP
+      # EXL3 uses these compute GPUs; swap with Qwen3.8 workloads.
+      - Q3.8-FN-EXL3

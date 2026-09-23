@@ -1,0 +1,29 @@
+# On-demand TabbyAPI profile for Qwen3.8-Flash-Next EXL3.
+# The default TabbyAPI config.yml remains model-unloaded and authenticated; this
+# profile is selected only by the llama-swap Q3.8-FN-EXL3 entry.
+network:
+  host: 127.0.0.1
+  # Launcher supplies the dynamically assigned port through the environment.
+  disable_auth: true
+  # No browser-origin access when auth is disabled. llama-swap proxies requests
+  # locally; CORS is not needed for that server-to-server path.
+  allowed_origins: []
+  api_servers: [OAI]
+
+model:
+  model_dir: /mnt/models
+  model_name: Qwen3.8-Flash-Next-exl3
+  backend: exllamav3
+  cache_size: 131072
+  cache_mode: Q8
+  tensor_parallel: false
+  gpu_split_auto: false
+  # Device order is fixed by CUDA_VISIBLE_DEVICES in the launcher:
+  # RTX 3090, RTX 5070 Ti, non-busy MSI RTX 5060 Ti; ZOTAC is excluded.
+  gpu_split: [20, 13, 14.5]
+  cpu_moe_offload_layers: 10
+  cpu_moe_threads: 10
+  max_batch_size: 1
+  ngram_ram: false
+  vision: false
+  warmup: false
