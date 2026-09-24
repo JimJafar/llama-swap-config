@@ -448,9 +448,10 @@ models:
       --port 8080
     cmdStop: docker stop qwen38-flash-next
 
-    # Qwen3.8-Flash-Next EXL3 via TabbyAPI/ExLlamaV3; tested at 128K/Q8 with
-    # a [20, 13, 14.5] GiB split across 3090, 5070 Ti and MSI 5060 Ti, plus 10
-    # CPU offload: 10 MoE layers. A 130,816-token prompt passed. ZOTAC excluded.
+    # Qwen3.8-Flash-Next EXL3 via TabbyAPI/ExLlamaV3 at native 262,144 context
+    # with Q8 cache. A 196,608-token prompt passed with a [20, 13, 14.5] GiB
+    # split across 3090, 5070 Ti, MSI 5060 Ti and 10 CPU-offloaded MoE layers.
+    # ZOTAC excluded; prior 130,816-token/128K smoke test also passed.
     # This on-demand profile leaves TabbyAPI's default config unchanged.
     # Tabby auth is disabled per request; llama-swap has no per-model auth gate.
     # Its endpoint is the access boundary; Tabby binds loopback and CORS is off.
@@ -462,7 +463,7 @@ models:
       - PYTHONUNBUFFERED=1
       - TABBY_LOG_LEVEL=WARNING
     # Launcher sets a private umask and runs TabbyAPI in its app directory.
-    cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 131072
+    cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 262144
 
     # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch
     # qwen4exp/mtp @ 53b1389d0 (its 2026-09-18 merge of upstream master) with a real MTP

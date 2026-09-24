@@ -14,7 +14,8 @@ model:
   model_dir: /mnt/models
   model_name: Qwen3.8-Flash-Next-exl3
   backend: exllamav3
-  cache_size: 131072
+  # Keep full model-native context capacity aligned with launcher --max-seq-len.
+  cache_size: 262144
   cache_mode: Q8
   tensor_parallel: false
   gpu_split_auto: false

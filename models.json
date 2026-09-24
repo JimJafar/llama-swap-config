@@ -46,8 +46,8 @@
           "input": [
             "text"
           ],
-          "contextWindow": 131072,
-          "maxTokens": 124518,
+          "contextWindow": 262144,
+          "maxTokens": 249036,
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
