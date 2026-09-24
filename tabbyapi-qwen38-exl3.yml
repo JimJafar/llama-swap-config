@@ -14,15 +14,17 @@ model:
   model_dir: /mnt/models
   model_name: Qwen3.8-Flash-Next-exl3
   backend: exllamav3
-  # Keep full model-native context capacity aligned with launcher --max-seq-len.
+  # Four-GPU profile; align cache_size with launcher --max-seq-len.
   cache_size: 262144
   cache_mode: Q8
   tensor_parallel: false
   gpu_split_auto: false
   # Device order is fixed by CUDA_VISIBLE_DEVICES in the launcher:
-  # RTX 3090, RTX 5070 Ti, non-busy MSI RTX 5060 Ti; ZOTAC is excluded.
-  gpu_split: [20, 13, 14.5]
-  cpu_moe_offload_layers: 10
+  # RTX 3090, RTX 5070 Ti, MSI RTX 5060 Ti, shared ZOTAC RTX 5060 Ti.
+  # Keep existing llama-server/crispasr processes resident on the shared card.
+  # Qwen's ZOTAC split is capped at 10.5 GiB.
+  gpu_split: [20, 13, 14.5, 10.5]
+  cpu_moe_offload_layers: 0
   cpu_moe_threads: 10
   max_batch_size: 1
   ngram_ram: false

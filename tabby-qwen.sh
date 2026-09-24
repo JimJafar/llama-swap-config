@@ -14,6 +14,7 @@ export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES="\
 GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,\
 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,\
-GPU-57bbb375-a61a-6662-e9c8-447b948f0833"
+GPU-57bbb375-a61a-6662-e9c8-447b948f0833,\
+GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a"
 exec .venv/bin/python main.py \
   --config /home/jim/llama-swap/tabbyapi-qwen38-exl3.yml

@@ -99,7 +99,7 @@ hooks:
 # *(Note: Setting this to false will reduce your KV Cache hit rate during multi-turn chats because the prompt string will dynamically mutate).*
 
 ##################################################################################
-# GPU TOPOLOGY (4 GPUs, 72 GB VRAM total; updated 2026-09-12)                    #
+# GPU TOPOLOGY (4 GPUs, 72 GiB; updated 2026-09-24)                          #
 #   All four cards are installed and enumerate as shown. Pin every entry by UUID #
 #   so a card swap or a re-ordering can never silently move a model.             #
 #                                                                                #
@@ -107,46 +107,37 @@ hooks:
 #   01:00.0   RTX 5060 Ti         16 GiB    compute      57bbb375      CUDA2     #
 #   02:00.0   RTX 3090            24 GiB    desktop/CPEG 93ab52e5      CUDA0     #
 #   03:00.0   RTX 5070 Ti         16 GiB    compute      d64df8cf      CUDA1     #
-#   M.2       RTX 5060 Ti ZOTAC   16 GiB    RESERVED     af5bd53f      CUDA3     #
+#   M.2 RTX 5060 Ti ZOTAC 16 GiB RESERVED af5bd53f CUDA3                       #
 #                                                                                #
 #   The 3090 is the display card (kwin/compositor on it, ~0.6-0.7 GiB). For      #
 #   the -sm tensor TP pair put the 3090 FIRST (CUDA0/--main-gpu 0) and bias      #
 #   --tensor-split toward it so it carries most weights + the larger KV share.   #
-#   CUDA index order is fastest-first, so the 3090 is CUDA0 and the ZOTAC is last.#
-#   CUDA_VISIBLE_DEVICES preserves the order you list, so naming the three       #
-#   compute UUIDs (93ab52e5,d64df8cf,57bbb375) keeps CUDA0..CUDA2 on those cards #
-#   and makes the ZOTAC invisible to that container.                              #
+#   CUDA order is fastest-first; 3090 is CUDA0 and ZOTAC is last.              #
+#   Most profiles list only the three compute UUIDs above. Tabby Qwen EXL3 is  #
+#   the four-GPU exception and lists the ZOTAC last.
 #                                                                                #
-# >>> ZOTAC af5bd53f IS RESERVED (2026-09-12) <<<                                #
-#   The ZOTAC is dedicated to the always-on voice stack and must not be          #
-#   allocated by any other model or group. RESIDENT (loaded at every boot):      #
-#     gemma-4-E4B-MTP  ~8.2 GiB  (LLM)      chatterbox-turbo  ~1.6 GiB  (TTS)    #
-#     s1-mini          ~1.5 GiB  (cleanup)  <-- ~11.3 GiB of 16 GiB committed    #
-#   Those three are members of the persistent "gemma-resident" group and are      #
-#   warmed at boot (see `preload:` and warmup-stt.sh).                           #
-#   qwen-clean-2b and parakeet-asr are ZOTAC-pinned but UNLISTED and NOT warmed   #
-#   (2026-09-12): s1-mini replaced qwen-clean-2b as baruch-server's cleanup model #
-#   and the NPU covers ASR, so both are on-demand fallbacks only. They load       #
-#   lazily into the ~4.5 GiB left free (measured: 11391 MiB used, 4499 MiB free).    #
-#   Every other entry excludes af5bd53f via CUDA_VISIBLE_DEVICES. Five models    #
-#   that used to sit on the ZOTAC (qwen3.5-9B-Q8, Q3.5-9B-Q4, curator-           #
-#   grooming, curator-harvesting, gemma-4-26B-MoE-MTP) moved to the MSI 5060 Ti  #
-#   (57bbb375) on 2026-09-12 and now share that card with the big models.        #
-#   CONSEQUENCE: the DeepSeek / Flash-Next --fit entries are back to 3 GPUs, so   #
-#   the measured 4-GPU MTP gain (~+21%, 14.2 -> 17.2 t/s) is deliberately        #
-#   forfeited in exchange for the ZOTAC being exclusive. Revisit if that trade    #
-#   ever looks wrong.                                                             #
+# >>> ZOTAC VOICE-RESERVED; TABBY QWEN EXCEPTION (2026-09-24) <<<
+#   s1-mini (~1.5 GiB) and chatterbox-turbo (~1.6 GiB) remain loaded here.
+#   Q3.8-FN-EXL3 is approved to use a 10.5 GiB split alongside those services.
+#   The tested setup leaves ~2.9 GiB free. Gemma E4B (~8.2 GiB) cannot coexist.
+#   Unload Gemma before Qwen; it is in `preload` and may return after restart.
+#   qwen-clean-2b and parakeet-asr remain unlisted, on-demand fallbacks.
+#   Do not load them while Qwen uses ZOTAC. Other profiles exclude af5bd53f.
+#   Five former ZOTAC models moved to MSI on 2026-09-12.
+#   Other DeepSeek / Flash-Next --fit and MTP entries remain 3-GPU. Tabby
+#   Qwen EXL3 is the four-GPU exception; it trades headroom for zero CPU MoE
+#   offload at the configured 256K context.
 ##################################################################################
 
 preload:
   # Large GPU models are loaded on demand so whole-machine models such as
   # Qwen3.8-Flash-Next can fit without startup contention.
   #
-  # ZOTAC always-on voice stack (2026-09-12): kept resident permanently. These three
-  # commit ~11.3 GiB of the ZOTAC's 16 GiB -- the reason every other entry is pinned
-  # away from af5bd53f. qwen-clean-2b and parakeet-asr are deliberately NOT warmed:
-  # they are unlisted on-demand fallbacks and stay out of VRAM.
-  # Every model listed here must also be in the persistent "gemma-resident" group,
+  # ZOTAC hosts voice services; Tabby Qwen EXL3 may use 10.5 GiB here.
+  # Unload Gemma E4B before using Qwen; s1-mini and chatterbox can stay.
+  # qwen-clean-2b and parakeet-asr are on-demand fallbacks; do not load while
+  # Qwen uses the ZOTAC. Other profiles stay pinned away from this card.
+  # Every preloaded model must also be in the persistent "gemma-resident" group,
   # or it can be evicted.
   #
   # NOTE: `preload` only works for CHAT-shaped backends. llama-swap warms a preloaded
@@ -448,13 +439,12 @@ models:
       --port 8080
     cmdStop: docker stop qwen38-flash-next
 
-    # Qwen3.8-Flash-Next EXL3 via TabbyAPI/ExLlamaV3 at native 262,144 context
-    # with Q8 cache. A 196,608-token prompt passed with a [20, 13, 14.5] GiB
-    # split across 3090, 5070 Ti, MSI 5060 Ti and 10 CPU-offloaded MoE layers.
-    # ZOTAC excluded; prior 130,816-token/128K smoke test also passed.
-    # This on-demand profile leaves TabbyAPI's default config unchanged.
+    # Qwen3.8 EXL3 / TabbyAPI four-GPU trial; Q8 cache, 256K context.
+    # CPU MoE offload disabled; shared ZOTAC split capped at 10.5 GiB.
+    # Short zero-offload request passed with 256K configured; boundary untested.
+    # On-demand profile; TabbyAPI's default config remains unchanged.
     # Tabby auth is disabled per request; llama-swap has no per-model auth gate.
-    # Its endpoint is the access boundary; Tabby binds loopback and CORS is off.
+    # Endpoint is loopback-only and browser CORS is disabled.
   Q3.8-FN-EXL3:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
@@ -1633,17 +1623,19 @@ groups:
     swap: false
     exclusive: false
     persistent: true
-    # ZOTAC ALWAYS-ON VOICE STACK (2026-09-12). This group owns af5bd53f exclusively.
+    # ZOTAC voice stack; Tabby Qwen EXL3 now shares the card (2026-09-24).
     #   swap:false       -> members coexist; loading one never unloads another.
     #   exclusive:false  -> does NOT evict your other (ungrouped) models.
-    #   persistent:true  -> kept resident once loaded; a big-model load cannot evict it.
-    # MEMBERSHIP IS LOAD-BEARING: a model that is preloaded but NOT in this group is an
-    # ungrouped load, and llama-swap will evict the other residents when it starts.
-    # chatterbox-turbo was added here for exactly that reason (2026-09-12) -- without it,
-    # the first TTS request unloaded gemma-4-E4B-MTP and s1-mini.
-    # qwen-clean-2b and parakeet-asr are ZOTAC-pinned but deliberately NOT members and
-    # NOT warmed (2026-09-12): both are `unlisted`, load on demand only, and sit in the
-    # ~4.5 GiB the group leaves free. s1-mini is baruch-server's active cleanup model;
+    #   persistent:true  -> loaded members stay resident and cannot be evicted.
+    # Qwen's 10.5 GiB split cannot coexist with Gemma E4B (~8.2 GiB).
+    # Unload Gemma before Qwen requests; it is in `preload`.
+    # A llama-swap restart may load it again.
+    # MEMBERSHIP MATTERS: a preloaded model absent from this group is ungrouped
+    # and can evict the other residents when it starts.
+    # chatterbox-turbo joined in 2026-09-12 so its first TTS request would not
+    # unload Gemma E4B and s1-mini.
+    # qwen-clean-2b and parakeet-asr remain unlisted on-demand fallbacks.
+    # Do not load them while Qwen EXL3 uses the ZOTAC. s1-mini remains cleanup.
     # qwen-clean-2b is only its fallback/A-B entry.
     members:
       - gemma-4-E4B-MTP
@@ -1654,31 +1646,29 @@ groups:
     swap: false
     exclusive: false
     persistent: true
-    # SDLC-FACTORY MODEL (2026-09-13). The factory's configured model sits here so
-    # it stays resident instead of being swapped out from under a running Task.
+    # SDLC-FACTORY MODEL (2026-09-13): the factory model sits here so it stays
+    # resident instead of being swapped out under a running Task.
     #   persistent:true  -> a later big-model load cannot evict it.
     #   swap:false       -> it never unloads a co-member.
     # It is also in `preload`, so a llama-swap restart restores it rather than
     # leaving the next factory turn to pay the reload (see the preload note).
-    # CONSEQUENCE: while this is resident it holds 93ab52e5 + d64df8cf, and
-    # Flash-Next wants all three compute cards (93ab52e5 + d64df8cf + 57bbb375), so
-    # Flash-Next can no longer evict it the way group membership used to.
-    # switch-profile.sh therefore unloads this model first; loading Flash-Next
-    # directly from the llama-swap UI while this is resident will fail until it is
-    # unloaded. Revisit if the factory is idle for a long stretch.
+    # This holds 93ab52e5 + d64df8cf; Flash-Next needs all three compute cards
+    # (93ab52e5, d64df8cf, 57bbb375) and cannot evict it through group membership.
+    # switch-profile.sh unloads the factory model first. Loading Flash-Next from
+    # the llama-swap UI fails until the factory model is unloaded.
+    # Revisit if the factory is idle for a long stretch.
     members:
       - Q3.8-27B-IQ4XS
   "qwen35-9b":
     swap: true
     exclusive: false
     persistent: false
-    # STOP THE UNGROUPED EVICTION (2026-09-13). Q3.5-9B-Q4 moved from the ZOTAC
-    # to the MSI 5060 Ti (57bbb375) on 2026-09-12 but stayed OUT of every group, so
-    # loading it was an ungrouped load -- and an ungrouped load evicts the other
-    # residents (see the gemma-resident note and the chatterbox-turbo precedent).
-    # It was the observed cause of the factory model vanishing mid-Task.
-    #   exclusive:false  -> this group does not evict other models when it loads.
-    # It shares no card with the factory model (57bbb375 vs 93ab52e5 + d64df8cf).
+    # STOP UNGROUPED EVICTION (2026-09-13). Q3.5-9B-Q4 moved from ZOTAC to
+    # MSI (57bbb375) on 2026-09-12 but stayed out of every group. Ungrouped
+    # loading evicts residents; this caused the factory model to vanish mid-Task
+    # (see gemma-resident and the chatterbox-turbo precedent).
+    #   exclusive:false -> this group does not evict other models when it loads.
+    # It shares no card with the factory model (MSI vs 3090 + 5070 Ti).
     # NOTE: other models are still ungrouped and carry the same hazard --
     # Q3.6-35B-Q4, laguna-s-2.1-mainline, muse-glimmer-30B-dflash-vision,
     # gemma-4-31B-Q4-MTP, gemma-4-26B-MoE-MTP.
@@ -1689,32 +1679,27 @@ groups:
     swap: true
     exclusive: false
     persistent: false
-    # Q3.8-27B-Q6KM added 2026-09-10: it is pinned to the SAME card pair
-    # (3090 + 5070 Ti) as the Flash-Next / TP entries, so it must swap with them too.
-    # Without this it stayed resident and Flash-Next's --fit only saw the 5060 Ti free
-    # (Q6 held the other two cards), so Flash-Next ran on ~1 GPU. Now requesting any
-    # member evicts the others; genuine resident groups (gemma/dictation) are untouched.
+    # Q3.8-27B-Q6KM uses the same 3090 + 5070 Ti pair as Flash-Next/TP, so it
+    # must swap with those entries. Otherwise --fit saw only the 5060 Ti.
+    # (Q6 held the other cards) and Flash-Next ran on about one GPU.
+    # Requesting a qwen38-workload member evicts other group members; persistent
+    # resident groups (Gemma/dictation) are not evicted.
     # Q3.8-27B-IQ4XS was REMOVED here on 2026-09-13: it is now
     # persistent in `factory-resident`, so it can no longer swap with these.
     members:
       - Q3.8-27B-Q6KM
       - Q3.8-27B-IQ4XS-DF2
-      # 2026-09-18: the non-MTP Flash-Next entries (Q3.8-FN-AC-IQ4_XS and
-      # Q3.8-FN-GSQ-RCO-Q2_0) were REMOVED from this group at Jim's request -- they are
-      # `unlisted` now and the MTP variants are the ones in use. Same 3-card set throughout
-      # (5070 Ti + 5060 Ti + 3090).
-      # CAUTION: a model that is in NO group does not swap, so requesting a non-MTP variant
-      # would load it WITHOUT evicting these (VRAM oversubscription). Add one back here if
-      # you ever use it again.
+      # 2026-09-18: non-MTP Flash-Next entries were removed at Jim's request;
+      # MTP variants are in use. They use the same 3-card set (5070 Ti, MSI,
+      # 3090). CAUTION: an ungrouped non-MTP request does not swap and could
+      # oversubscribe VRAM. Add it back here before using it again.
       - Q3.8-FN-AC-IQ4XS-MTP
-      # Hemmingway added 2026-09-21: same 2-card pair (3090 + 5070 Ti) as
-      # Q3.8-27B-Q6KM, so it must swap with the rest of this group.
-      # NAME MUST MATCH THE MODEL KEY (line ~844: `Hemmingway`). It was written as
-      # `Q3.8-27B-Hemmingway-Q4KM` on 2026-09-21, which does not exist -- and a dangling
-      # member makes the whole config build fail, so llama-swap [WARN]ed "no model config
-      # for ..." on every reload and kept serving the previous config in silence.
+      # Hemmingway uses the same 3090 + 5070 Ti pair as Q6KM, so it swaps here.
+      # NAME MUST MATCH THE MODEL KEY (`Hemmingway`, near line 844). The old
+      # nonexistent name emitted a warning and left llama-swap serving the
+      # previous config on reload.
       - Hemmingway
-      # Q3.8-FN-GSQ-RCO-Q2_0-MTP added 2026-09-18: same 3-card set, same target, but MTP
+      # Q3.8-FN-GSQ-RCO-Q2_0-MTP uses the same 3-card set and target, with MTP
       # draft speculation instead of ngram-mod.
       - Q3.8-FN-GSQ-RCO-Q2_0-MTP
       # EXL3 uses these compute GPUs; swap with Qwen3.8 workloads.
