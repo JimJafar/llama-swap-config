@@ -162,7 +162,7 @@
           "maxTokens": 249036
         },
         {
-          "id": "Q3.8-27B-IQ4XS",
+          "id": "subagent",
           "input": [
             "text"
           ],

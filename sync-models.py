@@ -3,14 +3,20 @@
 
 - Model list = every entry in config.yaml `models:` that is not `unlisted`
   and not in EXCLUDES.
+- Model id = the entry's first `aliases` value when it has one, else the config
+  key (e.g. Q3.8-27B-IQ4XS -> `subagent`). llama-swap routes either name, but pi
+  sends models.json's id as `model`, and the alias is the name meant for clients.
+  `alias:` (singular) is NOT a llama-swap field and is ignored by the server, so
+  the server honours `aliases:` only.
 - contextWindow = taken from the model's `-c N`, `--fit-ctx N` or
   vLLM `--max-model-len N` flag in its cmd (falls back to whatever the
   current models.json says, then to DEFAULT_CONTEXT_WINDOW).
 - maxTokens = MAX_TOKENS_RATIO (95%) of contextWindow, recomputed on every run.
   pi defaults this to 16384, which truncates long-thinking models mid-reasoning.
 - Curated per-model fields (reasoning, input, thinkingLevelMap, compat,
-  thinkingFormat, ...) are preserved from the existing models.json for
-  ids it already has; brand-new ids get a minimal entry
+  thinkingFormat, ...) are looked up under the new id first, then the config key,
+  then preserved from the existing models.json for ids it already has;
+  brand-new ids get a minimal entry
   ({id, input: ["text"], contextWindow}) — add their reasoning/thinking
   fields by hand once.
 - Models removed from config.yaml (or marked unlisted) drop out.
@@ -166,6 +172,24 @@ PROVIDER = {
 }
 
 
+def model_aliases(entry: dict) -> list[str]:
+    """Client-facing names for a model: config `aliases` first, then `alias`.
+
+    llama-swap's field is `aliases` (a list). `alias` (singular) is not a
+    llama-swap field at all -- the server ignores it silently -- but it is read
+    here as a single-name convenience so a stray singular key in config.yaml
+    still reaches models.json instead of vanishing from both places.
+    """
+    raw = entry.get("aliases")
+    if raw is None:
+        raw = entry.get("alias")
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [a for a in raw if isinstance(a, str)]
+    return []
+
+
 def context_window(cmd: str) -> int | None:
     # `cmd` is a YAML block scalar and commonly contains shell comment lines
     # (`# ...`) that mention flags -- e.g. a note like "the 262K profile is
@@ -216,11 +240,24 @@ def main() -> None:
 
     new_models = []
     ctx_unparsed = []
+    renames = []
     for name, entry in cfg["models"].items():
         if entry.get("unlisted") or name in EXCLUDES:
             continue
-        keep = dict(cur_models.get(name, {"id": name, "input": ["text"]}))
-        keep["id"] = name
+        aliases = model_aliases(entry)
+        model_id = aliases[0] if aliases else name
+        if len(aliases) > 1:
+            # Only the first alias becomes the pi model id; further aliases stay
+            # routable in llama-swap but would be duplicate entries here.
+            print(f"note: {name}: extra aliases not exposed to pi:", aliases[1:])
+        # Curated fields follow the model, not its name: look up the new id first
+        # (that is what models.json used on the previous run), then the config
+        # key, so renaming a model to an alias keeps its reasoning/thinking wiring.
+        keep: dict[str, object] = dict(cur_models.get(model_id) or cur_models.get(name)
+                                       or {"input": ["text"]})
+        if model_id != name and name in cur_models:
+            renames.append((name, model_id))
+        keep["id"] = model_id
         parsed = context_window(entry.get("cmd", ""))
         if parsed is None:
             ctx_unparsed.append(name)
@@ -249,6 +286,7 @@ def main() -> None:
 
     old_ids = set(cur_models)
     new_ids = {m["id"] for m in new_models}
+    print("renamed: ", [f"{a} -> {b}" for a, b in renames] or "nothing")
     print("removing:", sorted(old_ids - new_ids) or "nothing")
     print("adding:  ", sorted(new_ids - old_ids) or "nothing")
     changed_ctx = [m["id"] for m in new_models
