@@ -1055,12 +1055,6 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop q38iq4xsmtptp
-    # KEY NAME MATTERS: llama-swap's model field is `aliases` (a LIST) --
-    # `alias:` (singular) is silently ignored: no startup error, no log line, the
-    # name just is not routable. (2026-09 batch: `alias: subagent` looked fine for
-    # weeks and did nothing.) Also requires top-level `includeAliasesInList: true`
-    # for the alias to appear in /v1/models; sync-models.py turns it into the pi
-    # model id.
     aliases: [subagent]
     # NAMING (2026-08-31 / 09-01): this entry briefly carried the vLLM variant's name;
     # that swap was reverted because the vLLM entry OOMs at load on the 5070, so this
