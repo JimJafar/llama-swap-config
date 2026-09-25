@@ -120,8 +120,9 @@ hooks:
 #   s1-mini (~1.5 GiB) and chatterbox-turbo (~1.6 GiB) remain loaded here.
 #   Q3.8-FN-EXL3 uses a 7.5 GiB split alongside those services (was 10.5 GiB).
 #   Measured after the rebalance: ~6.1 GiB free, up from ~2.4 GiB.
-#   Gemma E4B (~8.2 GiB) cannot coexist.
-#   Unload Gemma before Qwen; it is in `preload` and may return after restart.
+#   Gemma E4B (4.9 GiB weights) coexists ONLY because its context is 102400.
+#   At its former -c 262144 it needed 8.2 GiB and could not fit beside Qwen;
+#   at -c 131072 it still fails. See the gemma-4-E4B-MTP cmd.
 #   qwen-clean-2b and parakeet-asr remain unlisted, on-demand fallbacks.
 #   Do not load them while Qwen uses ZOTAC. Other profiles exclude af5bd53f.
 #   Five former ZOTAC models moved to MSI on 2026-09-12.
@@ -135,7 +136,8 @@ preload:
   # Qwen3.8-Flash-Next can fit without startup contention.
   #
   # ZOTAC hosts voice services; Tabby Qwen EXL3 may use 7.5 GiB here.
-  # Unload Gemma E4B before using Qwen; s1-mini and chatterbox can stay.
+  # Gemma E4B is capped at -c 102400 so it fits beside Qwen; s1-mini and
+  # chatterbox can stay. Raising Gemma's context or Qwen's split breaks this.
   # qwen-clean-2b and parakeet-asr are on-demand fallbacks; do not load while
   # Qwen uses the ZOTAC. Other profiles stay pinned away from this card.
   # Every preloaded model must also be in the persistent "gemma-resident" group,
@@ -1339,7 +1341,11 @@ models:
       --spec-draft-n-max 2
       -ngl 99
       -ngld 99
-      -c 262144
+      # 102400 (100K), not the model's native 131072: this is what lets Gemma
+      # sit beside the Tabby Qwen EXL3 split on the ZOTAC. Gemma VRAM is linear
+      # in context (3453 MiB + 0.018074*tokens, measured); 100K needs ~5304 MiB
+      # of the ~5625 MiB left by Qwen. 131072 does NOT fit (-198 MiB).
+      -c 102400
       -np 1
       -fa auto
       --no-mmap
@@ -1628,8 +1634,8 @@ groups:
     #   swap:false       -> members coexist; loading one never unloads another.
     #   exclusive:false  -> does NOT evict your other (ungrouped) models.
     #   persistent:true  -> loaded members stay resident and cannot be evicted.
-    # Qwen's 7.5 GiB split cannot coexist with Gemma E4B (~8.2 GiB).
-    # Unload Gemma before Qwen requests; it is in `preload`.
+    # Qwen's 7.5 GiB split coexists with Gemma E4B only at -c 102400.
+    # Gemma is in `preload`, so a llama-swap restart restores it.
     # A llama-swap restart may load it again.
     # MEMBERSHIP MATTERS: a preloaded model absent from this group is ungrouped
     # and can evict the other residents when it starts.

@@ -288,8 +288,8 @@
           "input": [
             "text"
           ],
-          "contextWindow": 262144,
-          "maxTokens": 249036
+          "contextWindow": 102400,
+          "maxTokens": 97280
         },
         {
           "id": "s1-mini",
