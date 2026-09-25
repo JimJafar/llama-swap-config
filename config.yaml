@@ -116,10 +116,11 @@ hooks:
 #   Most profiles list only the three compute UUIDs above. Tabby Qwen EXL3 is  #
 #   the four-GPU exception and lists the ZOTAC last.
 #                                                                                #
-# >>> ZOTAC VOICE-RESERVED; TABBY QWEN EXCEPTION (2026-09-24) <<<
+# >>> ZOTAC VOICE-RESERVED; TABBY QWEN EXCEPTION (2026-09-25) <<<
 #   s1-mini (~1.5 GiB) and chatterbox-turbo (~1.6 GiB) remain loaded here.
-#   Q3.8-FN-EXL3 is approved to use a 10.5 GiB split alongside those services.
-#   The tested setup leaves ~2.9 GiB free. Gemma E4B (~8.2 GiB) cannot coexist.
+#   Q3.8-FN-EXL3 uses a 7.5 GiB split alongside those services (was 10.5 GiB).
+#   Measured after the rebalance: ~6.1 GiB free, up from ~2.4 GiB.
+#   Gemma E4B (~8.2 GiB) cannot coexist.
 #   Unload Gemma before Qwen; it is in `preload` and may return after restart.
 #   qwen-clean-2b and parakeet-asr remain unlisted, on-demand fallbacks.
 #   Do not load them while Qwen uses ZOTAC. Other profiles exclude af5bd53f.
@@ -133,7 +134,7 @@ preload:
   # Large GPU models are loaded on demand so whole-machine models such as
   # Qwen3.8-Flash-Next can fit without startup contention.
   #
-  # ZOTAC hosts voice services; Tabby Qwen EXL3 may use 10.5 GiB here.
+  # ZOTAC hosts voice services; Tabby Qwen EXL3 may use 7.5 GiB here.
   # Unload Gemma E4B before using Qwen; s1-mini and chatterbox can stay.
   # qwen-clean-2b and parakeet-asr are on-demand fallbacks; do not load while
   # Qwen uses the ZOTAC. Other profiles stay pinned away from this card.
@@ -440,7 +441,7 @@ models:
     cmdStop: docker stop qwen38-flash-next
 
     # Qwen3.8 EXL3 / TabbyAPI four-GPU trial; Q8 cache, 256K context.
-    # CPU MoE offload disabled; shared ZOTAC split capped at 10.5 GiB.
+    # CPU MoE offload disabled; shared ZOTAC split capped at 7.5 GiB.
     # Short zero-offload request passed with 256K configured; boundary untested.
     # On-demand profile; TabbyAPI's default config remains unchanged.
     # Tabby auth is disabled per request; llama-swap has no per-model auth gate.
@@ -1627,7 +1628,7 @@ groups:
     #   swap:false       -> members coexist; loading one never unloads another.
     #   exclusive:false  -> does NOT evict your other (ungrouped) models.
     #   persistent:true  -> loaded members stay resident and cannot be evicted.
-    # Qwen's 10.5 GiB split cannot coexist with Gemma E4B (~8.2 GiB).
+    # Qwen's 7.5 GiB split cannot coexist with Gemma E4B (~8.2 GiB).
     # Unload Gemma before Qwen requests; it is in `preload`.
     # A llama-swap restart may load it again.
     # MEMBERSHIP MATTERS: a preloaded model absent from this group is ungrouped
