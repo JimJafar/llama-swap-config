@@ -516,6 +516,16 @@ models:
     # +50-62% MTP figures are recorded above, so those do NOT transfer here.
     # Do not re-trial MTP on this file without a new build.
     #
+    # n_max 2 ALSO TRIED (same sweep, same session): acceptance 66.3% vs 52.6%
+    # and decode 30.78 vs 29.32 at 7k (+5%), mean accepted len 2.29-2.36 vs
+    # 2.53-2.61. Shallower drafts are the better setting because they waste
+    # fewer tokens, but BOTH depths still sit below the official image's 33.4
+    # t/s measured in that same session, and both cost ~28% prefill
+    # (573 vs 791 t/s). If MTP is ever revisited here, use n_max 2.
+    # METHOD NOTE: run-to-run variance is ~5-10% (the official baseline moved
+    # 36.85 -> 33.4 t/s across sessions, the fork 27.4 -> 28.2). Compare only
+    # within a single sweep, never across sessions.
+    #
     # unlisted: safe A/B, requestable by id, never preloaded, so it cannot
     # disturb the resident voice stack or the preload set.
   Q3.8-FN-Swift-IQ3_XXS:
