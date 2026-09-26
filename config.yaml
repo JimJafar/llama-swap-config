@@ -451,6 +451,26 @@ models:
     # ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF (GSQ-RCO mixed-precision
     # requant by ISTA DASLab of the Swift-1.5 post-train).
     #
+    # VERIFIED in the local GGUF headers (2026-09-26, both shards COMPLETE:
+    # the expected span from the tensor table equals the actual file size,
+    # byte-exact, on both):
+    #   shard 1  37.053 GiB = engram 26.822 GiB + body 10.221 GiB (316 tensors)
+    #   shard 2  33.696 GiB = body only (906 tensors)
+    #   TOTAL    70.739 GiB = body 43.916 GiB + engram 26.822 GiB
+    # The engram is per_layer_token_embd.weight [160, 320001536] at type 20
+    # (IQ4_NL): this requant stores the 51.2B-element n-gram codebook at
+    # 4.5 bpw, ~26.8 GiB -- HALF the ~51 GB the AtomicChat IQ4_XS entry
+    # carries. That is the real win here: the whole codebook fits the 64 GB
+    # box's page cache, where the AC entry's 51 GB forces disk reads per
+    # token (its ~12 t/s). RAM is otherwise free because the body is fully
+    # VRAM-resident, so prefer -lazy-mode off (RAM) over on (SSD).
+    # Quant mix: IQ3_S 9.1, IQ4_NL 8.0, Q2_0 6.6, IQ2_S 5.0, IQ2_XS 4.5,
+    # IQ2_XXS 3.6, IQ3_XXS 3.6, Q4_K/Q5_K/Q6_K 1.6, F32/BF16 1.6 GiB.
+    # Q2_0 is ggml type 42 (mainline enum: Q1_0 41, Q2_0 42; confirmed in the
+    # local qwen4exp-mtp fork's ggml.h). The official image is newer than that
+    # fork, so it handles it -- if a load ever fails with an unknown tensor
+    # type, Q2_0 is the thing to chase.
+    #
     # BUDGET (MEASURED free VRAM 2026-09-26; desktop already on the 3090):
     #   5070 Ti 15897 + 5060 Ti 15898 + 3090 22572 MiB = 53.09 GiB.
     #   With 512 MiB headroom on the two consumer cards and 1 GiB on the 3090
@@ -459,7 +479,17 @@ models:
     #   which --load-mode none keeps OUT of VRAM). Plus q8_0 KV at the full
     #   262144 native context (~3.6 GiB) plus ~1 GiB compute = ~48.5 GiB, so
     #   ~2.6 GiB spare. Full native context, no need to trade context away.
-    #   f16 KV at 262144 (~6.8 GiB) does NOT fit in that budget -- keep q8_0.
+      # body 43.916 GiB + q8_0 KV 3.59 GiB + ~1 GiB compute = ~48.5 GiB
+      # against 51.09 GiB usable => ~2.6 GiB spare. Full native 262144.
+      # f16 KV at 262144 (~6.8 GiB) does NOT fit in that budget -- keep q8_0.
+      #
+      # LOAD-VERIFIED 2026-09-26 (build b11176, official image, --fit on):
+      # loaded in ~25 s at the full 262144 context. nvidia-smi after load:
+      # 5060 Ti 15165 / 3090 22759 / 5070 Ti 15173 MiB used = 51.85 GiB, with
+      # 777 / 1385 / 761 MiB free -- every card ABOVE its --fit-target, i.e.
+      # the body is fully resident and nothing spilled to RAM. The 26.8 GiB
+      # engram never enters VRAM in either lazy-mode. Decode 38.9 t/s, prefill
+      # 333 t/s at low reasoning effort (see the engram note for the A/B).
     #
     # KV IS CHEAP HERE: only 12 of 48 blocks carry KV (full_attention_interval 4
     # -> compress_ratios 4 on blocks 3,7,...,47) at 2 KV heads x (256 key + 256
@@ -479,16 +509,23 @@ models:
     cmd: |
       docker run --rm --name qwen38-swift-iq3 --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # Mount the model directory ITSELF as /models, plus just the chat
+      # template as a file. That keeps every line in this entry at <=80 cols,
+      # which mounting all of /mnt/models would not: the shard filename alone
+      # is 57 chars and /models/<long dir>/<file> reaches 118.
+      -p ${PORT}:8080
+      -v /mnt/models/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS:/models:ro
+      -v /mnt/models/qwen_sharp_template_oneline.jinja:/tpl.jinja:ro
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/Swift-Flash-Next-IQ3_XXS/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf
+      -m /models/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf
       --fit on
       # CUDA0 = 5070 Ti, CUDA1 = 5060 Ti, CUDA2 = 3090 (the 3090 carries the
       # desktop, so it keeps 1 GiB; the two consumer cards only need 512 MiB).
       --fit-target 512,512,1024
       --device CUDA0,CUDA1,CUDA2
       --threads 20
-      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      # the template path is the file-mounted /tpl.jinja (see the mounts above)
+      --jinja --chat-template-file /tpl.jinja
       --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
       --flash-attn on
       -c 262144
@@ -501,10 +538,16 @@ models:
       # engram offload. NOTE: --load-mode is the GENERAL load mode
       # (auto/none/mmap/mlock/dio), NOT an engram switch; the control is
       # --lazy-mode (on = read rows from disk on demand, requires mmap; auto =
-      # same for tensors > 4 GiB; off = keep resident). This IQ4_NL n-gram table
-      # is 26.8 GiB, so default `auto` already reads it on demand. A/B it: with
-      # the body fully in VRAM the 64 GB box has RAM free, so `-lzm off`
-      # (RAM-resident) should beat disk reads, which dominate per-token cost.
+      # same for tensors > 4 GiB; off = keep resident).
+      # MEASURED 2026-09-26, both ways, same prompt (the "KV cache" bench):
+      #   default  container RAM  5.65 GiB | prefill 333.3 | decode 38.86 t/s
+      #   -lzm off container RAM 32.78 GiB | prefill 366.4 | decode 42.66 t/s
+      # So holding the 26.8 GiB table in RAM buys only ~+10%, and costs 27 GiB
+      # on a 64 GB box shared with the voice stack/factory (available RAM fell
+      # 40 -> 16 GiB). DEFAULT KEPT: the page cache already serves most reads,
+      # and 27 GiB of anonymous memory is unreclaimable under pressure. Add
+      #   --lazy-mode off
+      # back only for a dedicated-throughput run with the box otherwise idle.
       --load-mode none
       --spec-type ngram-mod
       --spec-ngram-mod-n-match 24
@@ -1866,5 +1909,10 @@ groups:
       # Q3.8-FN-GSQ-RCO-Q2_0-MTP uses the same 3-card set and target, with MTP
       # draft speculation instead of ngram-mod.
       - Q3.8-FN-GSQ-RCO-Q2_0-MTP
+      # Q3.8-FN-Swift-IQ3_XXS (added 2026-09-26) uses the same 3 cards
+      # (5070 Ti + MSI 5060 Ti + 3090). Kept here for the same reason the
+      # non-MTP entries were: an ungrouped 3-card request does not swap and
+      # can oversubscribe VRAM.
+      - Q3.8-FN-Swift-IQ3_XXS
       # EXL3 uses these compute GPUs; swap with Qwen3.8 workloads.
       - Q3.8-FN-EXL3
