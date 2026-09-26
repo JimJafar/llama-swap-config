@@ -98,34 +98,6 @@
           }
         },
         {
-          "id": "Q3.8-FN-GSQ-RCO-Q2_0-MTP",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 262144,
-          "maxTokens": 249036,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          }
-        },
-        {
           "id": "Q3.8-27B-Q6KM",
           "input": [
             "text"
@@ -158,6 +130,14 @@
           "input": [
             "text"
           ],
+          "contextWindow": 262144,
+          "maxTokens": 249036
+        },
+        {
+          "input": [
+            "text"
+          ],
+          "id": "Swift-1.5-27B-Q6KS",
           "contextWindow": 262144,
           "maxTokens": 249036
         },
@@ -216,24 +196,6 @@
               }
             }
           }
-        },
-        {
-          "id": "laguna-s-2.1-mainline",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 262144,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          },
-          "maxTokens": 249036
         },
         {
           "id": "muse-glimmer-30B-dflash-vision",
