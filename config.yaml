@@ -10,6 +10,13 @@
 # before -- otherwise you sync the previous state.                                #
 # ############################################################################## #
 
+# LINTING: this file is EXEMPT from yamllint -- see .yamllint.yaml. It carried
+# 457 legacy >80-col lines (416 comments predating the <=80 rule, 42 command
+# lines that cannot be wrapped: docker -e CUDA_VISIBLE_DEVICES= GPU-UUID lists,
+# -m paths, bind mounts), so the rule re-fired on every edit with nothing new.
+# The <=80 convention for NEW lines still applies here; it is enforced in
+# review, not by yamllint. Re-enable by deleting the `ignore` key there.
+
 # llama-swap runs as a host binary (llama-swap-bin AUR). Most model backends run
 # as Docker containers: llama.cpp uses the mostlygeek image with its entrypoint
 # overridden to /app/llama-server, while vLLM uses the vllm image. Q3.8-FN-EXL3
