@@ -533,10 +533,21 @@ models:
     # 36.85 -> 33.4 t/s across sessions, the fork 27.4 -> 28.2). Compare only
     # within a single sweep, never across sessions.
     #
+    # ngram-mod vs NO SPECULATION -- measured 2026-09-26 on the official image,
+    # same file, same flags, only the speculation flags differing, 7,043-token
+    # prompt. This is the baseline the MTP block above was missing:
+    #   --spec-type none                      prefill 801.6 | decode 36.20
+    #   ngram-mod 24/24/86 (previous)         prefill 814.6 | decode 36.93
+    #   ngram-mod 24/12/32 (now used)         prefill 817.1 | decode 37.30
+    # So ngram-mod is NOT a cost here: it is ~+2% and was not slower on either
+    # prompt. What lost was MTP, never ngram. The margin sits inside the 5-10%
+    # variance above, so read the window change as aligning this entry with the
+    # other ngram entries' 2026-08-22 retune (long ngrams rarely match this
+    # model), not as a measured win.
+    #
     # unlisted: safe A/B, requestable by id, never preloaded, so it cannot
     # disturb the resident voice stack or the preload set.
   Q3.8-FN-Swift-IQ3_XXS:
-    unlisted: true
     cmd: |
       docker run --rm --name qwen38-swift-iq3 --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
@@ -580,10 +591,11 @@ models:
       #   --lazy-mode off
       # back only for a dedicated-throughput run with the box otherwise idle.
       --load-mode none
+      # window retuned to match the other ngram entries (see the A/B above)
       --spec-type ngram-mod
       --spec-ngram-mod-n-match 24
-      --spec-ngram-mod-n-min 24
-      --spec-ngram-mod-n-max 86
+      --spec-ngram-mod-n-min 12
+      --spec-ngram-mod-n-max 32
 
       --reasoning-format deepseek
       --reasoning on
@@ -597,6 +609,11 @@ models:
       --timeout 900
       --host 0.0.0.0
       --port 8080
+    # The note above promises this is unlisted; until 2026-09-26 the key was
+    # missing, so it was being published to pi like any other model. It is an
+    # A/B entry, so it stays routable by id through llama-swap but out of
+    # pi's model list (matching Q3.8-FN-AC-IQ4_XS).
+    unlisted: true
     cmdStop: docker stop qwen38-swift-iq3
 
     # Qwen3.8 EXL3 / TabbyAPI four-GPU trial; Q8 cache, 256K context.

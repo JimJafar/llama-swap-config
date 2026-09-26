@@ -61,10 +61,16 @@ DEFAULT_CONTEXT_WINDOW = 32768
 # to the space actually left after the prompt, so a value this high is safe.
 MAX_TOKENS_RATIO = 0.95
 
-# Per-family pi thinking/effort wiring, applied to every base model whose id
-# (lowercased) contains the marker. Overrides reasoning / thinkingLevelMap /
-# compat on the base entry (so hand-curated "off": null maps get replaced by
-# real controls).
+# Per-family pi thinking/effort wiring. A spec matches a base model when EITHER
+# its id (lowercased) contains one of `marker`, OR its cmd names one of
+# `template`. Overrides reasoning / thinkingLevelMap / compat on the base entry
+# (so hand-curated "off": null maps get replaced by real controls).
+#
+# Why both: the family is really determined by the chat template (that is what
+# decides which kwargs are accepted), not by the model's name. Fine-tunes get
+# named after themselves -- Swift-1.5-27B-Q6KS runs the Qwen3.8 sharp template
+# but its id carries no q3.8/qwen3.8 marker, so marker-only matching silently
+# stripped its thinking controls with no error at all.
 #
 # Mechanic: thinkingFormat "chat-template" + chatTemplateKwargs with
 # {"$var": "thinking.enabled"} / {"$var": "thinking.effort"} makes pi send
@@ -84,8 +90,12 @@ THINKING_WIRING = [
     # main()). Both conventions are listed because config.yaml was renamed to short
     # ids on 2026-09-17 (Qwen3.8-* -> Q3.8-*); a marker that silently stops
     # matching strips pi's thinking controls with NO error at all.
+    # `template` is the durable half of the match: every entry that runs this
+    # jinja file takes reasoning_effort and enable_thinking, whatever it is
+    # called (Hemmingway and Swift-1.5-27B-Q6KS were both being missed).
     {
         "marker": ["q3.8", "qwen3.8"],
+        "template": "qwen_sharp_template_oneline.jinja",
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {
@@ -241,11 +251,15 @@ def main() -> None:
     new_models = []
     ctx_unparsed = []
     renames = []
+    # model id -> its cmd, so the wiring pass below can match on the chat
+    # template as well as the id.
+    cmds: dict[str, str] = {}
     for name, entry in cfg["models"].items():
         if entry.get("unlisted") or name in EXCLUDES:
             continue
         aliases = model_aliases(entry)
         model_id = aliases[0] if aliases else name
+        cmds[model_id] = str(entry.get("cmd") or "")
         if len(aliases) > 1:
             # Only the first alias becomes the pi model id; further aliases stay
             # routable in llama-swap but would be duplicate entries here.
@@ -269,12 +283,22 @@ def main() -> None:
     # Apply per-family thinking/effort wiring to the base entries. `marker` is a
     # substring of the lowercased model id, and may be a list so one family can
     # carry several naming conventions at once.
+    # Apply per-family thinking/effort wiring to the base entries. A spec matches
+    # on a substring of the lowercased model id, or on the chat template named in
+    # the cmd -- `marker` and `template` may each be a string or a list, and the
+    # first matching spec wins (so order matters).
     for m in new_models:
+        cmd = cmds.get(m["id"], "")
         for spec in THINKING_WIRING:
             markers = spec["marker"]
             if isinstance(markers, str):
                 markers = [markers]
-            if any(mk in m["id"].lower() for mk in markers):
+            templates = spec.get("template") or []
+            if isinstance(templates, str):
+                templates = [templates]
+            id_hit = any(mk in m["id"].lower() for mk in markers)
+            tpl_hit = any(t in cmd for t in templates)
+            if id_hit or tpl_hit:
                 m.update(spec["fields"])
                 break
 
