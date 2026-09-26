@@ -502,6 +502,20 @@ models:
     # prefill compute buffer, which scales with -ub and is NOT split evenly
     # across cards -- lower -ub, not -c (see the 2x16 GB note in README).
     #
+    # MTP: TRIED AND REJECTED (measured 2026-09-26; same file, same flags, same
+    # cards, only --spec-type differing; fork binary images/qwen4exp-mtp; all at
+    # the 7,043-token prompt):
+    #   official b11176, ngram-mod : prefill 808.0 | decode 36.85
+    #   fork,           ngram-mod : prefill 785.6 | decode 27.41
+    #   fork,           draft-mtp : prefill 549.5 | decode 33.88
+    # Draft acceptance was healthy (56-66%, mean len 2.69-2.98) and MTP did lift
+    # the FORK's own decode (+23.6%), but that still lands BELOW the official
+    # image without MTP, and it costs 32% prefill. The fork's no-MTP decode is
+    # already 25.6% under b11176, so its MTP gain only partly closes that gap.
+    # This file is also ~7 GiB heavier than the GSQ-RCO-Q2_0 base whose
+    # +50-62% MTP figures are recorded above, so those do NOT transfer here.
+    # Do not re-trial MTP on this file without a new build.
+    #
     # unlisted: safe A/B, requestable by id, never preloaded, so it cannot
     # disturb the resident voice stack or the preload set.
   Q3.8-FN-Swift-IQ3_XXS:
