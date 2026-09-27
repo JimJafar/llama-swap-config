@@ -545,8 +545,12 @@ models:
     # other ngram entries' 2026-08-22 retune (long ngrams rarely match this
     # model), not as a measured win.
     #
-    # unlisted: safe A/B, requestable by id, never preloaded, so it cannot
-    # disturb the resident voice stack or the preload set.
+    # ENABLED FOR USE 2026-09-26. Previously intended as an unlisted safe A/B,
+    # but it is now published to pi on purpose. Still never preloaded: it sits
+    # in the swap group qwen38-workload, so selecting it swaps the resident 27B
+    # out and it holds the 5070 Ti + MSI 5060 Ti + 3090 only while in use
+    # (~25 s load, ~52 GiB across those three cards). Thinking levels are wired
+    # automatically (the id carries the q3.8 marker).
   Q3.8-FN-Swift-IQ3_XXS:
     cmd: |
       docker run --rm --name qwen38-swift-iq3 --runtime nvidia --ipc=host
@@ -609,11 +613,6 @@ models:
       --timeout 900
       --host 0.0.0.0
       --port 8080
-    # The note above promises this is unlisted; until 2026-09-26 the key was
-    # missing, so it was being published to pi like any other model. It is an
-    # A/B entry, so it stays routable by id through llama-swap but out of
-    # pi's model list (matching Q3.8-FN-AC-IQ4_XS).
-    unlisted: true
     cmdStop: docker stop qwen38-swift-iq3
 
     # Qwen3.8 EXL3 / TabbyAPI four-GPU trial; Q8 cache, 256K context.
