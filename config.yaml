@@ -659,8 +659,8 @@ models:
     # unloads THIS model when MemAvailable drops below 2 GiB: the desktop is
     # protected, but the run ends. IQ2_XS (arena 35.5 GiB) fits this box.
     # mlock: the arena cannot be pinned (ulimit -l is 8 MiB, soft and hard), so
-    # it is swappable and the box thrashes instead of failing cleanly. Raising it
-    # needs root: LimitMEMLOCK=infinity on the llama-swap unit.
+    # it is swappable and the box thrashes instead of failing cleanly. Raising
+    # it needs root: LimitMEMLOCK=infinity on the llama-swap unit.
     #
     # CAVEAT, same as Flash-Next: it wants 93ab52e5 + d64df8cf, which
     # `factory-resident` keeps loaded, and group membership cannot evict that
