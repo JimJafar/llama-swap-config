@@ -683,8 +683,8 @@ models:
     #
     # MEASURED 2026-09-30, 3 cards, 64K, int8 KV with KV streaming on:
     #   decode 76.1 t/s | prompt 98.7 t/s | expert cache hit 92.1%
-    #   vs IQ3_S's 56.7 / 87.2 / 84.0%. Faster as well as smaller: each expert is
-    #   smaller, so the same VRAM caches a bigger share of the 24,576.
+    #   vs IQ3_S's 56.7 / 87.2 / 84.0% -- faster as well as smaller, because
+    #   each expert is smaller, so the same VRAM caches a bigger share.
     #   RAM during the run: available 6.9 GiB, swap 8.7 GiB -- the guard did NOT
     #   fire, where on IQ3_S it did.
     #
