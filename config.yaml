@@ -676,15 +676,23 @@ models:
 
   Strata-Swift-IQ3XXS:
     # Swift 1.5 (UkisAI's fine-tune of Qwen3.8-Flash-Next) at IQ3_XXS, same
-    # engine and entry shape as Strata-IQ3S above. Chosen over IQ3_S for THIS box:
+    # engine and entry shape as Strata-IQ3S. Chosen over IQ3_S for this box:
     # arena_gb 42.9 vs 50.3, so it wants ~7 GiB less system RAM, and both shards
     # are already on disk (nothing to download). Swift's own claim: "thinks much
     # shorter (-63% thinking tokens, 1.8x sooner answers)".
     #
-    # LAYOUT QUIRK: the Swift release puts per_layer_token_embd in SHARD 1, where
-    # the qwen releases put it alone in shard 2 -- so this entry's --native and
-    # --ple-gguf are the SAME file. setup.py finds it by scanning for the tensor
-    # (setup.py ~line 1966); do not "fix" that by hand.
+    # MEASURED 2026-09-30, 3 cards, 64K, int8 KV with KV streaming on:
+    #   decode 76.1 t/s | prompt 98.7 t/s | expert cache hit 92.1%
+    #   vs IQ3_S's 56.7 / 87.2 / 84.0%. Faster as well as smaller: each expert is
+    #   smaller, so the same VRAM caches a bigger share of the 24,576.
+    #   RAM during the run: available 6.9 GiB, swap 8.7 GiB -- the guard did NOT
+    #   fire, where on IQ3_S it did.
+    #
+    # LAYOUT QUIRK: the Swift release puts the PLE tensor
+    # (per_layer_token_embd) in SHARD 1. The qwen releases put it alone
+    # in shard 2 -- so this entry's --native and --ple-gguf are the SAME file.
+    # setup.py finds it by scanning for the tensor (setup.py ~line 1966); do not
+    # "fix" that by hand.
     #
     # Its engine config also turns KV STREAMING on (--kv-resident): the KV cache
     # lives in RAM (~0.9 GB at 64K) so more expert slots fit in VRAM.
