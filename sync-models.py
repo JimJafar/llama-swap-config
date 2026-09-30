@@ -58,8 +58,9 @@ DEFAULT_CONTEXT_WINDOW = 32768
 # is a launcher script whose real flags live in a file that script reads. Without
 # an entry here they fall back to DEFAULT_CONTEXT_WINDOW and pi truncates early.
 CONTEXT_OVERRIDES: dict[str, int] = {
-    # Strata: --max-context 65536 lives in /home/jim/Strata/strata-iq3_s.json.
+    # Strata: --max-context 65536 lives in the strata-*.json engine configs.
     "Strata-IQ3S": 65536,
+    "Strata-Swift-IQ3XXS": 65536,
 }
 
 # pi defaults each model's maxTokens (max OUTPUT tokens, sent as the request's

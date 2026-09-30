@@ -120,6 +120,28 @@
           }
         },
         {
+          "input": [
+            "text"
+          ],
+          "id": "Strata-Swift-IQ3XXS",
+          "contextWindow": 65536,
+          "maxTokens": 62259,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": "off",
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": null,
+            "max": null
+          },
+          "compat": {
+            "supportsDeveloperRole": false,
+            "thinkingFormat": "openai"
+          }
+        },
+        {
           "id": "Q3.8-FN-AC-IQ4XS-MTP",
           "input": [
             "text"
