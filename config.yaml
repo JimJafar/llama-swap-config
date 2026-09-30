@@ -639,26 +639,39 @@ models:
     # entry (like Q3.8-FN-EXL3 above), not a `docker run llama-server` one.
     #
     # ADDED 2026-09-30. Engine built from source here (engine/strata, 0.1.27,
-    # sm_120); pack + MTP layer in /home/jim/Strata-data; the GGUFs stay where
-    # they are and are read in place. Setup picked a 2-card layer split
-    # (nvidia-smi 0 + 2 = MSI 5060 Ti + 5070 Ti) and 64K context.
+    # sm_120 + sm_86); pack + MTP layer in /home/jim/Strata-data; the GGUFs stay
+    # where they are and are read in place. Setup picked a 3-card layer split
+    # (nvidia-smi 0+1+2 = MSI 5060 Ti + 3090 + 5070 Ti) and 64K context.
     #
-    # COST: IQ3_S is the heaviest of the four quants -- arena_gb 50.3 of SYSTEM
-    # RAM for the experts, and Strata's own note on it is "needs a 64 GB PC with
-    # little else running". Check `free -g` before starting; reclaimable page
-    # cache does not count towards it.
+    # MEASURED 2026-09-30 on this entry (IQ3_S, 64K, int8 KV):
+    #   2 cards (0,2)    decode 47.5 t/s | prompt 53.0 t/s | cache hit 66.8%
+    #   3 cards (0,1,2)  decode 56.7 t/s | prompt 87.2 t/s | cache hit 84.0%
+    # The 3090 added 14.21 GiB of expert cache, and --expert-cache auto still
+    # left ~7.5 GiB of VRAM unused: --expert-cache-device1/2 could claim it.
+    # Card 3 (ZOTAC) is deliberately EXCLUDED -- docs/MULTI_GPU.md measured that
+    # a much slower extra card makes the pair slower ("every extra card costs
+    # its own round per window"), and that card sits on the chipset.
     #
-    # CAVEAT, same as Flash-Next: it needs d64df8cf, which `factory-resident`
-    # holds persistently, and group membership cannot evict that group.
-    # Unload the factory model first (switch-profile.sh) or VRAM will be short.
+    # THE COST: IQ3_S needs arena_gb 50.3 of SYSTEM RAM for the experts, and
+    # Strata's own note is "needs a 64 GB PC with little else running". A run
+    # drives MemAvailable to ~2 GiB and pushes 15-20 GiB into zram. On the first
+    # attempt the OOM killer took Paseo, so /home/jim/Strata/ram-guard.sh now
+    # unloads THIS model when MemAvailable drops below 2 GiB: the desktop is
+    # protected, but the run ends. IQ2_XS (arena 35.5 GiB) fits this box.
+    # mlock: the arena cannot be pinned (ulimit -l is 8 MiB, soft and hard), so
+    # it is swappable and the box thrashes instead of failing cleanly. Raising it
+    # needs root: LimitMEMLOCK=infinity on the llama-swap unit.
+    #
+    # CAVEAT, same as Flash-Next: it wants 93ab52e5 + d64df8cf, which
+    # `factory-resident` keeps loaded, and group membership cannot evict that
+    # group. Unload the factory model first or VRAM will be short.
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_s
-    # unlisted: routable by name through llama-swap, and its web UI works at
-    # http://127.0.0.1:8033/, but it stays out of pi's model list until we pick
-    # what to publish (sync-models.py cannot infer a contextWindow from a cmd
-    # like this one, and would advertise a wrong value).
-    unlisted: true
+    # LISTED 2026-09-30 so it can be picked directly. sync-models.py has a
+    # CONTEXT_OVERRIDES entry for it because a launcher-script cmd carries no
+    # context flag, and pi would otherwise advertise 32768 rather than the
+    # 65536 in strata-iq3_s.json.
     cmd: /home/jim/Strata/run-strata.sh ${PORT}
 
     # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch

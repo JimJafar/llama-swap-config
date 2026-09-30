@@ -54,6 +54,14 @@ EXCLUDES = {
 
 DEFAULT_CONTEXT_WINDOW = 32768
 
+# Models whose context window cannot be parsed out of the cmd, because the cmd
+# is a launcher script whose real flags live in a file that script reads. Without
+# an entry here they fall back to DEFAULT_CONTEXT_WINDOW and pi truncates early.
+CONTEXT_OVERRIDES: dict[str, int] = {
+    # Strata: --max-context 65536 lives in /home/jim/Strata/strata-iq3_s.json.
+    "Strata-IQ3S": 65536,
+}
+
 # pi defaults each model's maxTokens (max OUTPUT tokens, sent as the request's
 # max_completion_tokens) to 16384, which truncates heavy thinking models such as
 # Qwen3.8 mid-reasoning. Set it to this fraction of the model's context window
@@ -173,6 +181,26 @@ THINKING_WIRING = [
             },
         },
     },
+    # Strata (id Strata-IQ3S), the Qwen3.8-Flash-Next engine behind a proxy. It is
+    # OpenAI-compatible and takes the standard top-level `reasoning_effort` field
+    # with off/low/medium/high, so thinkingFormat "openai" -- NOT the
+    # chat-template mechanism used above, and no chat-template kwargs at all. It
+    # does not understand the `developer` role, so pi must send `system`.
+    {
+        "marker": "strata",
+        "fields": {
+            "reasoning": True,
+            "thinkingLevelMap": {
+                "off": "off", "minimal": "low", "low": "low",
+                "medium": "medium", "high": "high",
+                "xhigh": None, "max": None,
+            },
+            "compat": {
+                "supportsDeveloperRole": False,
+                "thinkingFormat": "openai",
+            },
+        },
+    },
 ]
 
 PROVIDER = {
@@ -272,7 +300,7 @@ def main() -> None:
         if model_id != name and name in cur_models:
             renames.append((name, model_id))
         keep["id"] = model_id
-        parsed = context_window(entry.get("cmd", ""))
+        parsed = context_window(entry.get("cmd", "")) or CONTEXT_OVERRIDES.get(model_id)
         if parsed is None:
             ctx_unparsed.append(name)
         ctx = parsed or keep.get("contextWindow") or DEFAULT_CONTEXT_WINDOW
@@ -280,9 +308,6 @@ def main() -> None:
         keep["maxTokens"] = max_tokens(ctx)
         new_models.append(keep)
 
-    # Apply per-family thinking/effort wiring to the base entries. `marker` is a
-    # substring of the lowercased model id, and may be a list so one family can
-    # carry several naming conventions at once.
     # Apply per-family thinking/effort wiring to the base entries. A spec matches
     # on a substring of the lowercased model id, or on the chat template named in
     # the cmd -- `marker` and `template` may each be a string or a list, and the
