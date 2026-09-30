@@ -1264,6 +1264,13 @@ models:
       --spec-ngram-mod-n-min 48
       --spec-ngram-mod-n-max 64
 
+      # --no-host: with -sm tensor, llama.cpp materialises the whole model in a
+      # private anon host buffer -- SPLIT_MODE_TENSOR must divide every tensor
+      # across the two ranks, so it cannot stream from the mmap'd GGUF. With
+      # -ngl 99 it all sits in VRAM anyway and that host copy is never read
+      # again. MEASURED 2026-09-30 without this flag: 14.38 GiB unnamed anon,
+      # 100% swapped out (0.009 GiB resident) -> ~8 GiB of zram RAM for nothing.
+      --no-host
       -b 2048
       # 2-slot unified shared KV pool: two slots share one pool on the fast TP pair;
       # idle slots cost ~0. -c is the TOTAL pool (KV allocated up front, split across
