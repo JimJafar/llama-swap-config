@@ -631,6 +631,36 @@ models:
     # Launcher sets a private umask and runs TabbyAPI in its app directory.
     cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 262144
 
+  Strata-IQ3S:
+    # Strata (github.com/Niko1221/Strata) is NOT llama.cpp. It is an engine
+    # purpose-built for Qwen3.8-Flash-Next that keeps all 24,576 MoE experts in
+    # system RAM, caches the hottest on the GPU, streams the ngram/PLE table
+    # from SSD, and drafts with the model's own MTP layer. So it is a PROXY
+    # entry (like Q3.8-FN-EXL3 above), not a `docker run llama-server` one.
+    #
+    # ADDED 2026-09-30. Engine built from source here (engine/strata, 0.1.27,
+    # sm_120); pack + MTP layer in /home/jim/Strata-data; the GGUFs stay where
+    # they are and are read in place. Setup picked a 2-card layer split
+    # (nvidia-smi 0 + 2 = MSI 5060 Ti + 5070 Ti) and 64K context.
+    #
+    # COST: IQ3_S is the heaviest of the four quants -- arena_gb 50.3 of SYSTEM
+    # RAM for the experts, and Strata's own note on it is "needs a 64 GB PC with
+    # little else running". Check `free -g` before starting; reclaimable page
+    # cache does not count towards it.
+    #
+    # CAVEAT, same as Flash-Next: it needs d64df8cf, which `factory-resident`
+    # holds persistently, and group membership cannot evict that group.
+    # Unload the factory model first (switch-profile.sh) or VRAM will be short.
+    checkEndpoint: /health
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: qwen3.8-flash-next-iq3_s
+    # unlisted: routable by name through llama-swap, and its web UI works at
+    # http://127.0.0.1:8033/, but it stays out of pi's model list until we pick
+    # what to publish (sync-models.py cannot infer a contextWindow from a cmd
+    # like this one, and would advertise a wrong value).
+    unlisted: true
+    cmd: /home/jim/Strata/run-strata.sh ${PORT}
+
     # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch
     # qwen4exp/mtp @ 53b1389d0 (its 2026-09-18 merge of upstream master) with a real MTP
     # draft, as a HOST binary.  Upstream has the qwen4exp MODEL (PR #27742, merged) but NOT
@@ -1970,3 +2000,22 @@ groups:
       - Q3.8-FN-Swift-IQ3_XXS
       # EXL3 uses these compute GPUs; swap with Qwen3.8 workloads.
       - Q3.8-FN-EXL3
+  "strata":
+    swap: true
+    exclusive: true
+    persistent: false
+    # STRATA (2026-09-30). A group of its own, so it can reserve the two cards
+    # it wants (MSI 5060 Ti + 5070 Ti) without joining qwen38-workload, whose
+    # other members all also want the 3090.
+    #   exclusive:true   -> loading it evicts the other models, freeing the
+    #                      cards while its engine allocates. The qwen35-9b note
+    #                      above records that exclusive:false does NOT evict.
+    #   persistent:false -> it can be evicted again when you ask for one of your
+    #                       own models, so this is not a one-way door.
+    #   swap:true        -> only one member, so it mostly marks the group as
+    #                       swappable against the ungrouped entries.
+    # WHAT IT CANNOT DO: evict a persistent resident. `factory-resident` holds
+    # d64df8cf, and the note there records that group membership cannot unload
+    # it (Flash-Next has the same problem) -- unload that model first.
+    members:
+      - Strata-IQ3S
