@@ -40,6 +40,10 @@
 #   rlimit is unlimited -- mlock() accepts rlimit OR capability, so this stays least-priv.
 #   KEEP --mlock AND --ulimit TOGETHER: --mlock without the rlimit is a no-op, and the
 #   rlimit without --mlock only widens a limit nothing uses.
+#   FLAG RENAME (2026-10-01): llama-server build 11277 (the :cuda image pulled
+#   2026-09-30) removed --no-mmap and --mlock ("invalid argument"). They are now one
+#   --load-mode: `--no-mmap --mlock` -> `--load-mode mlock`, `--no-mmap` -> `--load-mode
+#   none`. "--mlock" in the notes above means --load-mode mlock.
 #
 # IMAGE POLICY (2026-09-07): do NOT pin llama.cpp / vLLM / llama-swap builds. Everything
 # tracks mainline "latest": official ggml-org llama.cpp uses the rolling server-cuda13 tag;
@@ -65,6 +69,10 @@ includeAliasesInList: true
 hooks:
   on_startup:
     preload:
+      # Strata FIRST. Since 2026-10-01 it shares the persistent, swap:false
+      # "resident" group with the voice models, so the order no longer decides who
+      # survives; Strata first just gives its engine the cards before anything else.
+      - Strata-IQ3XXS
       - whisper-npu-asr
       # s1-mini is tiny (462 MiB) and its load is ~seconds, so preloading it at every
       # llama-swap start keeps Baruch's first dictation warm without startup cost worth
@@ -143,6 +151,9 @@ hooks:
 #   offload at the configured 256K context.
 ##################################################################################
 
+# NOTE 2026-09-30: this top-level `preload:` key is NOT read by llama-swap -- the
+# reload log only ever preloads hooks.on_startup.preload (near the top). Kept for its
+# history; edit the hooks list to change what actually preloads.
 preload:
   # Large GPU models are loaded on demand so whole-machine models such as
   # Qwen3.8-Flash-Next can fit without startup contention.
@@ -152,24 +163,20 @@ preload:
   # chatterbox can stay. Raising Gemma's context or Qwen's split breaks this.
   # qwen-clean-2b and parakeet-asr are on-demand fallbacks; do not load while
   # Qwen uses the ZOTAC. Other profiles stay pinned away from this card.
-  # Every preloaded model must also be in the persistent "gemma-resident" group,
-  # or it can be evicted.
+  # A preloaded model must be in a persistent group, or it can be evicted.
   #
   # NOTE: `preload` only works for CHAT-shaped backends. llama-swap warms a preloaded
   # model with a chat request, so an ASR/TTS backend 404s and llama-swap then STOPS the
   # process it just started (observed for whisper-npu-asr and chatterbox-turbo).
   # chatterbox-turbo is therefore warmed through its real endpoint by stt-warmup
   # (warmup-stt.sh) instead of being listed here.
-  - gemma-4-E4B-MTP
-  - s1-mini
-  # SDLC-FACTORY MODEL (2026-09-13): the factory's configured model
-  # (config/factory.yaml -> models.bootstrap-planner) must be resident BEFORE a turn
-  # starts. Its provider turn is bounded at 900s, so a cold load paid inside that
-  # bound is indistinguishable from a hung provider: the factory records a
-  # provider-unavailable Infrastructure Failure, and four of those park the Task on
-  # an infrastructure Hold. Preloading restores it after every llama-swap restart
-  # (19 restarts by 2026-09-13, each of which left it unloaded).
-  - Q3.8-27B-IQ4XS
+  #
+  # 2026-09-30: STRATA IS THE ONLY PRELOADED AND THE ONLY PERSISTENT MODEL (Jim's
+  # call). It serves the `subagent` alias and the librarian curator. gemma-4-E4B-MTP,
+  # s1-mini and Q3.8-27B-IQ4XS (the old factory model) were removed from preload:
+  # Strata's group is exclusive, so it would evict them straight after they loaded,
+  # and the 27B wants the same 3090 + 5070 Ti that Strata holds.
+  - Strata-IQ3XXS
 
 models:
   # ########### #
@@ -199,8 +206,7 @@ models:
       --fit-target 256
       -np 1
       -fa on
-      --no-mmap
-      --mlock
+      --load-mode mlock
       -b 2048
       -ub 2048
       -ctk q8_0
@@ -242,7 +248,7 @@ models:
       -c 250000
       -fa on
       -np 2
-      --no-mmap
+      --load-mode none
       -b 2048
       -ub 2048
 
@@ -309,7 +315,7 @@ models:
       -c 132768
       -fa on
       -np 1
-      --no-mmap
+      --load-mode none
       -b 2048
       -ub 2048
 
@@ -354,7 +360,7 @@ models:
       -c 132768
       -fa on
       -np 1
-      --no-mmap
+      --load-mode none
       -b 2048
       -ub 2048
 
@@ -453,6 +459,76 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop qwen38-flash-next
+
+    # Explore instance for the EnGram Explorer token-continuation browser
+    # (~/llama-swap/engram-explorer, pm2 engram-explorer, http://marvin:8350). Re-created
+    # 2026-10-01 on the AtomicChat IQ4_XS GGUF (its per_layer_token_embd engram table is
+    # 320M x 160, Q5_1, 35.8 GiB) after the UD-IQ4_XS model and its explore entry were
+    # removed. Identical to Q3.8-FN-AC-IQ4_XS except reasoning OFF and temp 0, so n_probs
+    # continuations are substantive tokens, not chain-of-thought noise. The explorer
+    # reaches it through llama-swap's /upstream/<model>/ passthrough (/tokenize,
+    # /completion), so no fixed host port is needed. Not preloaded; swaps within
+    # qwen38-workload like the other Flash-Next entries.
+  Q3.8-FN-AC-IQ4_XS-explore:
+    unlisted: true
+    cmd: |
+      docker run --rm --name qwen38-flash-next-explore --runtime nvidia --ipc=host
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
+      --fit on
+      # 2026-09-10 (MEASURED): with --fit-target the fit now uses ALL THREE GPUs --
+      # ~50.1 GiB total at -c 196608, leaving 5060 Ti 977 MiB / 3090 2334 MiB /
+      # 5070 Ti 1241 MiB free. Device order = 5070 Ti (CUDA0), 5060 Ti (CUDA1),
+      # 3090 (CUDA2). Lowering the 3090 target to 512 changed nothing (used
+      # 21737 -> 21757 MiB): --fit is LAYER-GRANULAR, so the next layer/experts do
+      # not fit and it keeps ~2.3 GiB idle on the 3090 regardless. 1024 is therefore
+      # the floor that GUARANTEES the requested >=1 GiB headroom on the 3090 (which
+      # also carries the desktop). To consume the remaining 3090 slack you would
+      # have to drop --fit and place layers by hand.
+      --fit-target 1024,1024,1024
+      --device CUDA0,CUDA1,CUDA2
+      --threads 20
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+      --flash-attn on
+      -c 196608
+      # 2026-09-15 (MEASURED): -b 2048 -ub 512 beats the previous -b 512 -ub 256 on prefill
+      # (+21% at 8k: 527->640 t/s; +22% at 32k: 483->590 t/s, TTFT 68.0->55.5 s; +20% at 98k)
+      # with no decode cost. -ub 1024/2048 improve prefill slightly but collapse tg (33/24 t/s),
+      # so -ub 512 is the ceiling. Loads healthy at -c 196608 (KV is preallocated at load).
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      -np 1
+
+      # engrams on ssd
+      --load-mode none
+
+      # draft speculation - ngram
+      # Official latest llama.cpp (server-cuda13, build >=10666) -- Qwen3.8-Flash-Next
+      # (qwen4exp) MODEL support merged in PR #27742, but the MTP draft graph (PR #27739)
+      # is NOT in the official image, so no draft-mtp here. MTP was trialled via a patched
+      # build but gave ~0 speedup (12 t/s; the 51 GiB PLE n-gram table dominates per-token
+      # cost and MTP only skips transformer layers), so it was reverted. ngram fallback kept.
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --reasoning off
+      --temp 0.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop qwen38-flash-next-explore
 
     # Qwen3.8-Flash-Next Swift-1.5 GSQ-RCO IQ3_XXS (added 2026-09-26).
     # ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF (GSQ-RCO mixed-precision
@@ -631,55 +707,20 @@ models:
     # Launcher sets a private umask and runs TabbyAPI in its app directory.
     cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 262144
 
-  Strata-IQ3S:
-    # Strata (github.com/Niko1221/Strata) is NOT llama.cpp. It is an engine
-    # purpose-built for Qwen3.8-Flash-Next that keeps all 24,576 MoE experts in
-    # system RAM, caches the hottest on the GPU, streams the ngram/PLE table
-    # from SSD, and drafts with the model's own MTP layer. So it is a PROXY
-    # entry (like Q3.8-FN-EXL3 above), not a `docker run llama-server` one.
+  Strata-IQ3XXS:
+    # 2026-10-01: NOW THE BASE MODEL. Qwen3.8-Flash-Next GSQ-RCO IQ3_XXS (ISTA-DASLab),
+    # engine 0.1.31, launcher run-strata-qwen.sh, engine config strata-iq3_xxs.json
+    # (its header lists the hand edits on top of setup). Renamed from
+    # Strata-Swift-IQ3XXS: Swift 1.5 (UkisAI's fine-tune) was dropped and its files
+    # deleted because it fell into thinking loops of 240K tokens (see RUNAWAY GUARD).
+    # Same card order, context, KV streaming, mmap and defaults as before; the one
+    # change is that mmap now reads the experts from the GGUF in place (0.1.31), so
+    # there is no experts.bin. EVERYTHING MEASURED BELOW WAS ON SWIFT -- same quant and
+    # architecture, so the shapes should carry over, but re-measure before relying on it.
     #
-    # ADDED 2026-09-30. Engine built from source here (engine/strata, 0.1.27,
-    # sm_120 + sm_86); pack + MTP layer in /home/jim/Strata-data; the GGUFs stay
-    # where they are and are read in place. Setup picked a 3-card layer split
-    # (nvidia-smi 0+1+2 = MSI 5060 Ti + 3090 + 5070 Ti) and 64K context.
-    #
-    # MEASURED 2026-09-30 on this entry (IQ3_S, 64K, int8 KV):
-    #   2 cards (0,2)    decode 47.5 t/s | prompt 53.0 t/s | cache hit 66.8%
-    #   3 cards (0,1,2)  decode 56.7 t/s | prompt 87.2 t/s | cache hit 84.0%
-    # The 3090 added 14.21 GiB of expert cache, and --expert-cache auto still
-    # left ~7.5 GiB of VRAM unused: --expert-cache-device1/2 could claim it.
-    # Card 3 (ZOTAC) is deliberately EXCLUDED -- docs/MULTI_GPU.md measured that
-    # a much slower extra card makes the pair slower ("every extra card costs
-    # its own round per window"), and that card sits on the chipset.
-    #
-    # THE COST: IQ3_S needs arena_gb 50.3 of SYSTEM RAM for the experts, and
-    # Strata's own note is "needs a 64 GB PC with little else running". A run
-    # drives MemAvailable to ~2 GiB and pushes 15-20 GiB into zram. On the first
-    # attempt the OOM killer took Paseo, so /home/jim/Strata/ram-guard.sh now
-    # unloads THIS model when MemAvailable drops below 2 GiB: the desktop is
-    # protected, but the run ends. IQ2_XS (arena 35.5 GiB) fits this box.
-    # mlock: the arena cannot be pinned (ulimit -l is 8 MiB, soft and hard), so
-    # it is swappable and the box thrashes instead of failing cleanly. Raising
-    # it needs root: LimitMEMLOCK=infinity on the llama-swap unit.
-    #
-    # CAVEAT, same as Flash-Next: it wants 93ab52e5 + d64df8cf, which
-    # `factory-resident` keeps loaded, and group membership cannot evict that
-    # group. Unload the factory model first or VRAM will be short.
-    checkEndpoint: /health
-    proxy: http://127.0.0.1:${PORT}
-    useModelName: qwen3.8-flash-next-iq3_s
-    # LISTED 2026-09-30 so it can be picked directly. sync-models.py has a
-    # CONTEXT_OVERRIDES entry for it because a launcher-script cmd carries no
-    # context flag, and pi would otherwise advertise 32768 rather than the
-    # 65536 in strata-iq3_s.json.
-    cmd: /home/jim/Strata/run-strata.sh ${PORT}
-
-  Strata-Swift-IQ3XXS:
-    # Swift 1.5 (UkisAI's fine-tune of Qwen3.8-Flash-Next) at IQ3_XXS, same
-    # engine and entry shape as Strata-IQ3S. Chosen over IQ3_S for this box:
-    # arena_gb 42.9 vs 50.3, so it wants ~7 GiB less system RAM, and both shards
-    # are already on disk (nothing to download). Swift's own claim: "thinks much
-    # shorter (-63% thinking tokens, 1.8x sooner answers)".
+    # (history) Swift 1.5 at IQ3_XXS was chosen over IQ3_S for this box:
+    # arena_gb 42.9 vs 50.3, so it wants ~7 GiB less system RAM. Swift's own claim:
+    # "thinks much shorter (-63% thinking tokens, 1.8x sooner answers)".
     #
     # MEASURED 2026-09-30, 3 cards, 64K, int8 KV with KV streaming on:
     #   decode 76.1 t/s | prompt 98.7 t/s | expert cache hit 92.1%
@@ -688,21 +729,84 @@ models:
     #   RAM during the run: available 6.9 GiB, swap 8.7 GiB -- the guard did NOT
     #   fire, where on IQ3_S it did.
     #
-    # LAYOUT QUIRK: the Swift release puts the PLE tensor
-    # (per_layer_token_embd) in SHARD 1. The qwen releases put it alone
-    # in shard 2 -- so this entry's --native and --ple-gguf are the SAME file.
-    # setup.py finds it by scanning for the tensor (setup.py ~line 1966); do not
-    # "fix" that by hand.
+    # RE-MEASURED 2026-09-30 after upgrading the engine 0.1.27 -> 0.1.30 AND moving to
+    # 2 cards, "gpu": [2, 1] in strata-swift-iq3_xxs.json (5070 Ti first, 3090 second).
+    # Same prompts (unique nonce, no prefix reuse), 400 generated tokens, prefill t/s:
+    #   prompt tokens     950   3.5K   13.5K   25K
+    #   0.1.27 [0,1,2]    254    490     774   737   decode ~70
+    #   0.1.30 [0,1,2]    484    685     834   872   decode ~73
+    #   0.1.30 [1,2]      557   1036    1679  1865   decode ~85
+    #   0.1.30 [2,1]      574   1123    1830  2251   decode ~81   <- chosen (prefill)
+    #   0.1.30 [1,2,0]    426    533     536   508   (5060 Ti gets 1 layer; prompt loans shrink to 0.45 GiB)
+    # Why: 0.1.30 lets each split stage borrow its own cache slots for the prompt
+    # buffers (Strata PR #216) -> "prompt chunk auto: 8192 tokens" instead of 2048. The x4
+    # 5060 Ti as a third stage costs a hand-off per window and drags the chunk down.
+    # [2,1] beats [1,2] because the LAST stage carries the head + draft layer: the 3090
+    # absorbs that and still caches 16.9 GiB of experts (vs 9.6 GiB with the 5070 Ti last).
+    # GPU 0 (5060 Ti) is now free while Strata runs.
+    # Still open: only 7 GiB of the arena is pinned (8 GiB multi-GPU cap, Strata #253;
+    # fixed in 0.1.31 via STRATA_ARENA_PIN_GIB) and the service's LimitMEMLOCK is 8 MiB.
+    # Re-running setup.sh rewrites the json -- pass --gpus 2,1 to keep this order.
+    # The json also has "fit_max_tokens": true (2026-09-30): pi sends maxTokens (95% of
+    # the context) on every request, and Strata otherwise 400s when prompt + max_tokens
+    # > context; with it, Strata shortens the output cap to the room left. Check it
+    # survives any setup.sh re-run.
+    #
+    # CONTEXT 262144 (the trained max), set 2026-09-30 by editing --max-context in the
+    # json: setup.py would cap it at 128K (its rule: arena + KV + 24 GB headroom > 62 GB).
+    # Measured on [2,1]: 117K-token prompt 2587 t/s (45 s), decode 72.9;
+    #                    235K-token prompt 2435 t/s (96 s), decode 78.2, answer correct.
+    # Cost: KV RAM 0.77 -> 1.55 GiB; VRAM unchanged (--kv-resident keeps 32K cells on card).
+    # RAM at the 235K peak, with gemma + s1-mini also loaded: 1-2 GiB available and
+    # 9 GiB of Strata swapped to zram. Fine as the only model; risky alongside others.
+    # CONCURRENCY: Strata serves ONE request at a time (FIFO; by design, Strata #97/#249),
+    # and the multi-conversation cache is rejected with --layer-split.
+    #
+    # RAM MODE: --mmap-experts (added 2026-09-30). The pack now has experts.bin (40 GiB,
+    # built with iq_pack.py --experts-bin); the experts are served from the OS page
+    # cache, so they are FILE-backed and reclaimable instead of 43 GB of anonymous RAM
+    # that zram swaps. Measured on [2,1] at 262K: RssAnon 1.9-2.4 GiB, RssFile ~40 GiB,
+    # MemAvailable 41-43 GiB (was 1-5 GiB). Prefill 378/907/1442/1996 t/s at
+    # 1K/3.5K/13.5K/25K and 2304 at 117K (-10..-35% vs the arena; worst on short
+    # prompts), decode 86-88 (no worse). Under real memory pressure the evicted experts
+    # come back from the NVMe instead of zram -- not yet measured.
+    # --resident-experts (0.1.30's low-RAM resident mode) is REJECTED with a layer split:
+    # "--resident-cpu-experts does not support layer splits". Back to the arena: delete
+    # "--mmap-experts" from the json.
+    #
+    # 4 CARDS TRIED 2026-09-30 ([2,1,0,3], mmap, Gemma + chatterbox still on GPU 3):
+    # prefill 323/733/964/1104, decode 42-58 -- clearly WORSE than [2,1]. Auto split
+    # K=17,30,39 predicted 29.0 ms per decode window vs 24.7 ms for [2,1]. Why "all
+    # experts in VRAM" does not pay: [2,1] already caches ~98.8% of the ROUTED mass
+    # (decode hit rate ~99%); the ~7,000 experts left in RAM are rarely used. Two
+    # 5060 Tis (0.77 ms/layer, x4 links) and three hand-offs per window cost more than
+    # that last 1% saves. Gemma/chatterbox are persistent + preloaded/warmed on GPU 3
+    # and reload within seconds of an unload.
+    #
+    # LAYOUT: the base (ISTA-DASLab) release keeps the PLE tensor (per_layer_token_embd)
+    # alone in shard 2, so --native is shard 1 and --ple-gguf shard 2. (Swift had it in
+    # shard 1.) setup.py finds it by scanning for the tensor; do not "fix" that by hand.
     #
     # Its engine config also turns KV STREAMING on (--kv-resident): the KV cache
-    # lives in RAM (~0.9 GB at 64K) so more expert slots fit in VRAM.
-    #
-    # RAM still decides whether a run survives, and it is lighter than IQ3_S but
-    # not light: see the guard note above.
+    # lives in RAM (~3.6 GB at 262K) so more expert slots fit in VRAM.
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
-    useModelName: swift-1.5-iq3_xxs
-    cmd: /home/jim/Strata/run-strata-swift.sh ${PORT}
+    useModelName: qwen3.8-flash-next-iq3_xxs
+    cmd: /home/jim/Strata/run-strata-qwen.sh ${PORT}
+    aliases: [subagent]
+    # RUNAWAY GUARD (2026-10-01). A request with NO max_tokens gets the whole context as
+    # its output budget (~240K tokens), and Swift can fall into a thinking loop: the
+    # librarian curator (ssd-nodes, model `subagent`, no max_tokens, 5-min client
+    # timeout, intake every 5 min) ran three requests to 237-247K tokens, ~33 min each.
+    # Strata only notices a vanished client when it writes to it, so a non-streaming
+    # request keeps generating after the client gives up, and the next sweep queues
+    # behind it. `max_tokens?` only fills a MISSING value (the "?"), so pi and other
+    # clients that send their own max_tokens are unaffected. 16384 at ~110 t/s is
+    # ~2.5 min: done inside the curator's 5-min timeout.
+    # MOVED (2026-10-01) from a llama-swap `max_tokens?` filter to Strata's own
+    # strata-iq3_xxs.shared-settings.json ("max_tokens": 16384). The filter only checked
+    # max_tokens, so it also stamped requests that send max_completion_tokens (pi);
+    # Strata fills the default only when a request has neither.
 
     # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch
     # qwen4exp/mtp @ 53b1389d0 (its 2026-09-18 merge of upstream master) with a real MTP
@@ -1410,7 +1514,6 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop q38iq4xsmtptp
-    aliases: [subagent]
     # NAMING (2026-08-31 / 09-01): this entry briefly carried the vLLM variant's name;
     # that swap was reverted because the vLLM entry OOMs at load on the 5070, so this
     # llama.cpp entry is the working primary.
@@ -1581,8 +1684,7 @@ models:
       --tensor-split 1.3,1
       -np 1
       -fa on
-      --no-mmap
-      --mlock
+      --load-mode mlock
       -b 2048
       -ub 256
       -ctk q8_0
@@ -1633,8 +1735,7 @@ models:
       -c 256000
       -np 1
       -fa on
-      --no-mmap
-      --mlock
+      --load-mode mlock
       -b 2048
       -ub 512
       -ctk q8_0
@@ -1672,8 +1773,7 @@ models:
       -c 102400
       -np 1
       -fa auto
-      --no-mmap
-      --mlock
+      --load-mode mlock
       -b 2048
       -ub 512
       -ctk q8_0
@@ -1706,7 +1806,7 @@ models:
       --rope-freq-scale 0.75
       -ngl 99
       --embeddings
-      --no-mmap
+      --load-mode none
     cmdStop: docker stop bge
 
     # Qwen3-Embedding-4B (added 2026-07-04): upgrade over bge-m3 for CODE retrieval.
@@ -1878,7 +1978,7 @@ models:
       -c 8192
       -fa on
       -np 1
-      --no-mmap
+      --load-mode none
       --temp 0
       --timeout 900
       --host 0.0.0.0
@@ -1950,46 +2050,24 @@ models:
     #   (vLLM TP + the -sm tensor TP entry, pinned to idx 1,2) coexist with it fine.   #
     # ############################################################################## #
 groups:
-  "gemma-resident":
-    swap: false
+  "gemma-ondemand":
+    swap: true
     exclusive: false
-    persistent: true
-    # ZOTAC voice stack; Tabby Qwen EXL3 now shares the card (2026-09-24).
-    #   swap:false       -> members coexist; loading one never unloads another.
-    #   exclusive:false  -> does NOT evict your other (ungrouped) models.
-    #   persistent:true  -> loaded members stay resident and cannot be evicted.
+    persistent: false
+    # gemma-4-E4B-MTP on the ZOTAC, on demand only (2026-10-01): everything now points
+    # at Strata, so Gemma is no longer resident. Until 2026-10-01 it shared the
+    # "gemma-resident" group with the voice stack (see "resident" below).
+    #   exclusive:false  -> requesting it evicts nothing; it loads beside the residents.
+    #   persistent:false -> any exclusive load (e.g. a "resident" member) unloads it.
     # Qwen's 7.5 GiB split coexists with Gemma E4B only at -c 102400.
-    # Gemma is in `preload`, so a llama-swap restart restores it.
-    # A llama-swap restart may load it again.
-    # MEMBERSHIP MATTERS: a preloaded model absent from this group is ungrouped
-    # and can evict the other residents when it starts.
-    # chatterbox-turbo joined in 2026-09-12 so its first TTS request would not
-    # unload Gemma E4B and s1-mini.
-    # qwen-clean-2b and parakeet-asr remain unlisted on-demand fallbacks.
-    # Do not load them while Qwen EXL3 uses the ZOTAC. s1-mini remains cleanup.
-    # qwen-clean-2b is only its fallback/A-B entry.
+    # qwen-clean-2b and parakeet-asr remain unlisted on-demand fallbacks; do not load
+    # them while Qwen EXL3 uses the ZOTAC.
     members:
       - gemma-4-E4B-MTP
-      - whisper-npu-asr
-      - s1-mini
-      - chatterbox-turbo
-  "factory-resident":
-    swap: false
-    exclusive: false
-    persistent: true
-    # SDLC-FACTORY MODEL (2026-09-13): the factory model sits here so it stays
-    # resident instead of being swapped out under a running Task.
-    #   persistent:true  -> a later big-model load cannot evict it.
-    #   swap:false       -> it never unloads a co-member.
-    # It is also in `preload`, so a llama-swap restart restores it rather than
-    # leaving the next factory turn to pay the reload (see the preload note).
-    # This holds 93ab52e5 + d64df8cf; Flash-Next needs all three compute cards
-    # (93ab52e5, d64df8cf, 57bbb375) and cannot evict it through group membership.
-    # switch-profile.sh unloads the factory model first. Loading Flash-Next from
-    # the llama-swap UI fails until the factory model is unloaded.
-    # Revisit if the factory is idle for a long stretch.
-    members:
-      - Q3.8-27B-IQ4XS
+  # "factory-resident" (persistent, held Q3.8-27B-IQ4XS on the 3090 + 5070 Ti)
+  # was REMOVED 2026-09-30: Strata is the only persistent model, and two persistent
+  # models on the same cards cannot evict each other. The 27B went back into
+  # qwen38-workload with the other models on those cards.
   "qwen35-9b":
     swap: true
     exclusive: false
@@ -2015,9 +2093,14 @@ groups:
     # (Q6 held the other cards) and Flash-Next ran on about one GPU.
     # Requesting a qwen38-workload member evicts other group members; persistent
     # resident groups (Gemma/dictation) are not evicted.
-    # Q3.8-27B-IQ4XS was REMOVED here on 2026-09-13: it is now
-    # persistent in `factory-resident`, so it can no longer swap with these.
+    # Q3.8-27B-IQ4XS was removed on 2026-09-13 (made persistent in
+    # `factory-resident`) and came BACK on 2026-09-30 when that group was dropped.
+    # NOTE: no member here can load while persistent Strata holds the 3090 +
+    # 5070 Ti -- unload Strata first (curl -X POST .../api/models/unload/Strata-IQ3XXS).
     members:
+      # EnGram Explorer backend (reasoning-off clone of Q3.8-FN-AC-IQ4_XS).
+      - Q3.8-FN-AC-IQ4_XS-explore
+      - Q3.8-27B-IQ4XS
       - Q3.8-27B-Q6KM
       - Q3.8-27B-IQ4XS-DF2
       # 2026-09-18: non-MTP Flash-Next entries were removed at Jim's request;
@@ -2043,25 +2126,28 @@ groups:
       - Q3.8-FN-Swift-IQ3_XXS
       # EXL3 uses these compute GPUs; swap with Qwen3.8 workloads.
       - Q3.8-FN-EXL3
-  "strata":
-    swap: true
+  "resident":
+    swap: false
     exclusive: true
-    persistent: false
-    # STRATA (2026-09-30). A group of its own, so it can reserve the two cards
-    # it wants (MSI 5060 Ti + 5070 Ti) without joining qwen38-workload, whose
-    # other members all also want the 3090.
-    #   exclusive:true   -> loading it evicts the other models, freeing the
-    #                      cards while its engine allocates. The qwen35-9b note
-    #                      above records that exclusive:false does NOT evict.
-    #   persistent:false -> it can be evicted again when you ask for one of your
-    #                       own models, so this is not a one-way door.
-    #   swap:true        -> only one member, so it mostly marks the group as
-    #                       swappable against the ungrouped entries.
-    # WHAT IT CANNOT DO: evict a persistent resident. `factory-resident` holds
-    # d64df8cf, and the note there records that group membership cannot unload
-    # it (Flash-Next has the same problem) -- unload that model first.
+    persistent: true
+    # THE ALWAYS-ON STACK (2026-10-01): Strata plus the voice models. Replaces the
+    # "strata" group and the voice half of "gemma-resident".
+    # WHY ONE GROUP: "strata" was exclusive and "gemma-resident" was not persistent,
+    # so every Strata (re)load evicted whisper, s1-mini and chatterbox although they
+    # share no hardware (Strata: 5070 Ti + 3090; voice: NPU + ZOTAC).
+    #   swap:false       -> members coexist; loading one never unloads another.
+    #   exclusive:true   -> loading any member evicts non-persistent models, which
+    #                       frees the 3090 + 5070 Ti for Strata's engine. Side effect:
+    #                       reloading a voice model also evicts ad-hoc loads.
+    #   persistent:true  -> nothing evicts a member. Anything else wanting the 3090 or
+    #                       5070 Ti (the qwen38-workload models) cannot load until you
+    #                       unload Strata.
+    # Strata: "gpu": [2, 1] in ~/Strata/strata-iq3_xxs.json, 262K context,
+    # --mmap-experts; serves the `subagent` alias and the librarian curator.
+    # chatterbox-turbo is not preloaded (preload warms with a chat request, which
+    # 404s on a TTS backend); it loads on its first request and then stays.
     members:
-      # Both want the same 3 cards (0,1,2) and ~40-50 GiB of system RAM, so they
-      # swap with each other rather than coexist.
-      - Strata-IQ3S
-      - Strata-Swift-IQ3XXS
+      - Strata-IQ3XXS
+      - whisper-npu-asr
+      - s1-mini
+      - chatterbox-turbo
