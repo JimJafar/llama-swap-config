@@ -98,12 +98,12 @@
           }
         },
         {
+          "id": "subagent",
           "input": [
             "text"
           ],
-          "id": "Strata-IQ3S",
-          "contextWindow": 65536,
-          "maxTokens": 62259,
+          "contextWindow": 262144,
+          "maxTokens": 249036,
           "reasoning": true,
           "thinkingLevelMap": {
             "off": "off",
@@ -120,12 +120,12 @@
           }
         },
         {
+          "id": "Strata-IQ3XXS",
           "input": [
             "text"
           ],
-          "id": "Strata-Swift-IQ3XXS",
-          "contextWindow": 65536,
-          "maxTokens": 62259,
+          "contextWindow": 262144,
+          "maxTokens": 249036,
           "reasoning": true,
           "thinkingLevelMap": {
             "off": "off",
@@ -254,10 +254,10 @@
           }
         },
         {
-          "id": "subagent",
           "input": [
             "text"
           ],
+          "id": "Q3.8-27B-IQ4XS",
           "contextWindow": 393216,
           "maxTokens": 373555,
           "reasoning": true,

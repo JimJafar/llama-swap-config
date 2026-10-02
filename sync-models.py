@@ -4,8 +4,10 @@
 - Model list = every entry in config.yaml `models:` that is not `unlisted`
   and not in EXCLUDES.
 - Model id = the entry's first `aliases` value when it has one, else the config
-  key (e.g. Q3.8-27B-IQ4XS -> `subagent`). llama-swap routes either name, but pi
+  key (e.g. Strata-IQ3XXS -> `subagent`). llama-swap routes either name, but pi
   sends models.json's id as `model`, and the alias is the name meant for clients.
+  An aliased model is ALSO listed under its config key (same fields), so pi shows
+  the real model name beside the alias (2026-09-30).
   `alias:` (singular) is NOT a llama-swap field and is ignored by the server, so
   the server honours `aliases:` only.
 - contextWindow = taken from the model's `-c N`, `--fit-ctx N` or
@@ -43,6 +45,14 @@ import yaml
 CONFIG = Path.home() / "llama-swap/config.yaml"
 OUT = Path.home() / "llama-swap/models.json"
 DEST = Path.home() / ".pi/agent/models.json"
+# pi has no per-model default thinking level in models.json; it reads one from
+# settings.json `modelThinkingLevels` ("provider/modelId" -> level), which beats the
+# global `defaultThinkingLevel`. This script OWNS every "marvin/*" key there: it
+# writes one per model whose THINKING_WIRING spec has a `defaultLevel` and removes
+# the rest, so set levels in THINKING_WIRING, not by hand. Other providers' keys and
+# all other settings are left alone. Local only -- not pushed to guybrush/ssdnodes.
+PI_SETTINGS = Path.home() / ".pi/agent/settings.json"
+PROVIDER_NAME = "marvin"
 
 # Models in config.yaml that should NOT appear in models.json.
 # unlisted entries are skipped automatically; these are the rest.
@@ -57,11 +67,25 @@ DEFAULT_CONTEXT_WINDOW = 32768
 # Models whose context window cannot be parsed out of the cmd, because the cmd
 # is a launcher script whose real flags live in a file that script reads. Without
 # an entry here they fall back to DEFAULT_CONTEXT_WINDOW and pi truncates early.
-CONTEXT_OVERRIDES: dict[str, int] = {
-    # Strata: --max-context 65536 lives in the strata-*.json engine configs.
-    "Strata-IQ3S": 65536,
-    "Strata-Swift-IQ3XXS": 65536,
+CONTEXT_OVERRIDES: dict[str, int] = {}
+
+# Strata: the launcher reads a strata-*.json engine config, and --max-context in its
+# `args` is the real limit. Read it at sync time rather than hard-coding it here (a
+# hard-coded 65536 went stale when Swift moved to 262144 on 2026-09-30).
+STRATA_CONFIGS: dict[str, Path] = {
+    "Strata-IQ3XXS": Path.home() / "Strata" / "strata-iq3_xxs.json",
 }
+
+
+def strata_context(model_id: str) -> int | None:
+    path = STRATA_CONFIGS.get(model_id)
+    if path is None:
+        return None
+    try:
+        args = json.loads(path.read_text())["args"]
+        return int(args[args.index("--max-context") + 1])
+    except (OSError, KeyError, ValueError, IndexError):
+        return None
 
 # pi defaults each model's maxTokens (max OUTPUT tokens, sent as the request's
 # max_completion_tokens) to 16384, which truncates heavy thinking models such as
@@ -105,6 +129,9 @@ THINKING_WIRING = [
     {
         "marker": ["q3.8", "qwen3.8"],
         "template": "qwen_sharp_template_oneline.jinja",
+        # pi's startup thinking level for every model this spec matches (see
+        # PI_SETTINGS below). Optional; a spec without it leaves pi's global default.
+        "defaultLevel": "medium",
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {
@@ -182,13 +209,14 @@ THINKING_WIRING = [
             },
         },
     },
-    # Strata (id Strata-IQ3S), the Qwen3.8-Flash-Next engine behind a proxy. It is
+    # Strata (ids Strata-IQ3XXS / subagent), the Qwen3.8-Flash-Next engine behind a proxy. It is
     # OpenAI-compatible and takes the standard top-level `reasoning_effort` field
     # with off/low/medium/high, so thinkingFormat "openai" -- NOT the
     # chat-template mechanism used above, and no chat-template kwargs at all. It
     # does not understand the `developer` role, so pi must send `system`.
     {
         "marker": "strata",
+        "defaultLevel": "medium",   # Strata serves Qwen3.8-Flash-Next models
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {
@@ -283,12 +311,14 @@ def main() -> None:
     # model id -> its cmd, so the wiring pass below can match on the chat
     # template as well as the id.
     cmds: dict[str, str] = {}
+    keys: dict[str, str] = {}   # model id -> config key
     for name, entry in cfg["models"].items():
         if entry.get("unlisted") or name in EXCLUDES:
             continue
         aliases = model_aliases(entry)
         model_id = aliases[0] if aliases else name
         cmds[model_id] = str(entry.get("cmd") or "")
+        keys[model_id] = name
         if len(aliases) > 1:
             # Only the first alias becomes the pi model id; further aliases stay
             # routable in llama-swap but would be duplicate entries here.
@@ -298,23 +328,39 @@ def main() -> None:
         # key, so renaming a model to an alias keeps its reasoning/thinking wiring.
         keep: dict[str, object] = dict(cur_models.get(model_id) or cur_models.get(name)
                                        or {"input": ["text"]})
-        if model_id != name and name in cur_models:
+        if model_id != name and name in cur_models and model_id not in cur_models:
             renames.append((name, model_id))
         keep["id"] = model_id
-        parsed = context_window(entry.get("cmd", "")) or CONTEXT_OVERRIDES.get(model_id)
+        # strata_context is keyed by the CONFIG KEY: the id can be an alias that
+        # moves between models (subagent moved 27B -> Strata on 2026-09-30).
+        parsed = (context_window(entry.get("cmd", "")) or strata_context(name)
+                  or CONTEXT_OVERRIDES.get(model_id))
         if parsed is None:
             ctx_unparsed.append(name)
         ctx = parsed or keep.get("contextWindow") or DEFAULT_CONTEXT_WINDOW
         keep["contextWindow"] = ctx
         keep["maxTokens"] = max_tokens(ctx)
         new_models.append(keep)
+        if model_id != name:
+            # Also list the model under its config key, so pi shows the real model
+            # (Strata-IQ3XXS) beside the alias (subagent). llama-swap routes
+            # both names to the same process. The copy is taken after the curated
+            # fields and context are settled, so the two entries never disagree.
+            twin = {**keep, "id": name}
+            new_models.append(twin)
+            cmds[name] = cmds[model_id]
+            keys[name] = name
 
     # Apply per-family thinking/effort wiring to the base entries. A spec matches
-    # on a substring of the lowercased model id, or on the chat template named in
-    # the cmd -- `marker` and `template` may each be a string or a list, and the
-    # first matching spec wins (so order matters).
+    # on a substring of the lowercased model id OR config key, or on the chat
+    # template named in the cmd -- `marker` and `template` may each be a string or
+    # a list, and the first matching spec wins (so order matters). The config key
+    # counts because an alias id says nothing about the family: `subagent` moved
+    # from a Qwen3.8 27B to Strata and kept the 27B's chat-template wiring.
+    levels: dict[str, str] = {}   # "marvin/<id>" -> pi startup thinking level
     for m in new_models:
         cmd = cmds.get(m["id"], "")
+        key = keys.get(m["id"], "").lower()
         for spec in THINKING_WIRING:
             markers = spec["marker"]
             if isinstance(markers, str):
@@ -322,17 +368,25 @@ def main() -> None:
             templates = spec.get("template") or []
             if isinstance(templates, str):
                 templates = [templates]
-            id_hit = any(mk in m["id"].lower() for mk in markers)
+            id_hit = any(mk in m["id"].lower() or mk in key for mk in markers)
             tpl_hit = any(t in cmd for t in templates)
             if id_hit or tpl_hit:
                 m.update(spec["fields"])
+                if spec.get("defaultLevel"):
+                    levels[f"{PROVIDER_NAME}/{m['id']}"] = spec["defaultLevel"]
                 break
 
     out = {
         "providers": {
-            "marvin": {**PROVIDER, "models": new_models}
+            PROVIDER_NAME: {**PROVIDER, "models": new_models}
         }
     }
+
+    settings = json.loads(PI_SETTINGS.read_text()) if PI_SETTINGS.exists() else {}
+    old_levels = dict(settings.get("modelThinkingLevels") or {})
+    new_levels = {k: v for k, v in old_levels.items()
+                  if not k.startswith(f"{PROVIDER_NAME}/")}
+    new_levels.update(levels)
 
     old_ids = set(cur_models)
     new_ids = {m["id"] for m in new_models}
@@ -352,6 +406,10 @@ def main() -> None:
     changed_max = [m["id"] for m in new_models
                    if m["id"] in old_ids and m["maxTokens"] != cur_models[m["id"]].get("maxTokens")]
     print("maxTokens changes:", changed_max or "none")
+    level_changes = sorted(k for k in set(old_levels) | set(new_levels)
+                           if old_levels.get(k) != new_levels.get(k))
+    print("pi thinking-level changes:",
+          [f"{k}: {old_levels.get(k)} -> {new_levels.get(k)}" for k in level_changes] or "none")
 
     if dry_run:
         print("(dry run — nothing written)")
@@ -362,6 +420,10 @@ def main() -> None:
     shutil.copy2(OUT, DEST)
     print(f"wrote {OUT}")
     print(f"copied to {DEST}")
+    if level_changes:
+        settings["modelThinkingLevels"] = new_levels
+        PI_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
+        print(f"updated modelThinkingLevels in {PI_SETTINGS}")
     print("sending to guybrush & ssdnodes")
     src = str(Path.home() / "llama-swap/models.json")
     targets = [
