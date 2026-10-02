@@ -19,6 +19,7 @@ Env:
   MODEL            explore model id (default Qwen3.8-Flash-Next-UD-IQ4_XS-explore)
   GGUF_PATH        shard 1 of the model (default the one next to this script's host)
   EXPLORER_PORT    listen port (default 8350)
+  EXPLORER_HOST    bind address (default 0.0.0.0; 127.0.0.1 behind Tailscale Serve)
 """
 
 import http.server
@@ -47,6 +48,7 @@ GGUF_PATH = os.environ.get(
     "/mnt/models/Qwen3.8-Flash-Next-UD-IQ4_XS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
 )
 PORT = int(os.environ.get("EXPLORER_PORT", "8350"))
+HOST = os.environ.get("EXPLORER_HOST", "0.0.0.0")
 
 # --------------------------------------------------------------------------
 # tokenizer: load vocab from GGUF, decode byte-level BPE to readable text
@@ -55,16 +57,11 @@ class Tokenizer:
     def __init__(self, path):
         self.bpe = ByteLevelBPE(path)
         r = GGUFReader(path)
-        parts = r.fields["tokenizer.ggml.tokens"].parts
-        count = int(np.asarray(parts[4])[0])
-        self.tokens = []
-        i = 6
-        while len(self.tokens) < count and i < len(parts) - 1:
-            data = np.asarray(parts[i]); i += 1
-            if i >= len(parts):
-                break
-            n = int(np.asarray(parts[i])[0]); i += 1
-            self.tokens.append(bytes(data[:n]))
+        # Each string in a GGUF array is stored as (length, bytes); field.data holds the
+        # indices of the byte parts, so read those rather than pairing parts by hand
+        # (the old loop paired each token with the NEXT token's length and truncated it).
+        field = r.fields["tokenizer.ggml.tokens"]
+        self.tokens = [bytes(np.asarray(field.parts[idx])) for idx in field.data]
         # decode each token string (gpt2 byte-level) to readable text
         self.texts = [self._decode(t) for t in self.tokens]
         # full vocab list of dicts for search
@@ -98,32 +95,46 @@ class Tokenizer:
             return self.raw_to_id[cand]
         return None
 
+    def decode_ids(self, ids):
+        """Decode a token sequence as one byte string, so characters split across
+        tokens (emoji, CJK) come out whole instead of as replacement characters."""
+        raw = bytearray()
+        for tok in ids:
+            if not 0 <= tok < len(self.tokens):
+                continue
+            text = self.tokens[tok].decode("utf-8", errors="replace")
+            if all(ch in _BYTE_DECODER for ch in text):
+                raw += bytes(_BYTE_DECODER[ch] for ch in text)
+            else:
+                raw += text.encode("utf-8")
+        return raw.decode("utf-8", errors="replace")
+
     @staticmethod
     def _decode(b):
-        # GPT-2 / Qwen byte-level BPE decoding.
-        #  * b'\xc4\xa0' (U+0120, 'Ġ') -> space
-        #  * b'\xe2\x96\x81' is sometimes used too; handle both
-        #  * '<0xNN>' ASCII literal -> that byte
-        #  * other bytes decoded as UTF-8 (lossy)
-        out = bytearray()
-        i = 0
-        n = len(b)
-        while i < n:
-            # <0xNN>
-            if b[i:i+1] == b'<' and i + 5 <= n and b[i+1:i+3] == b'0x':
-                try:
-                    out.append(int(b[i+3:i+5], 16))
-                    i += 6
-                    continue
-                except ValueError:
-                    pass
-            # Ġ (C4 A0) or ▁ (E2 96 81) -> space
-            if b[i:i+1] == b'\xc4' and i + 2 <= n and b[i+1:i+2] == b'\xa0':
-                out.append(0x20); i += 2; continue
-            if b[i:i+1] == b'\xe2' and i + 3 <= n and b[i+1:i+3] == b'\x96\x81':
-                out.append(0x20); i += 3; continue
-            out.append(b[i]); i += 1
-        return out.decode("utf-8", errors="replace")
+        # Qwen uses GPT-2 byte-level BPE: every byte is stored as a printable stand-in
+        # character (space -> 'Ġ', newline -> 'Ċ', 0xE6 -> 'æ', ...). Map each character
+        # back to its byte, then decode UTF-8; a token holding part of a multi-byte
+        # character shows U+FFFD, as llama.cpp's own pieces do.
+        text = b.decode("utf-8", errors="replace")
+        if all(ch in _BYTE_DECODER for ch in text):
+            return bytes(_BYTE_DECODER[ch] for ch in text).decode("utf-8", errors="replace")
+        return text  # special tokens such as <|im_start|> are stored as plain text
+
+
+def _gpt2_byte_decoder():
+    """Inverse of GPT-2's bytes_to_unicode table (the stand-in character for each byte)."""
+    printable = (list(range(ord("!"), ord("~") + 1)) + list(range(ord("\u00a1"), ord("\u00ac") + 1))
+                 + list(range(ord("\u00ae"), ord("\u00ff") + 1)))
+    codes, extra = list(printable), 0
+    for byte in range(256):
+        if byte not in printable:
+            printable.append(byte)
+            codes.append(256 + extra)
+            extra += 1
+    return {chr(code): byte for byte, code in zip(printable, codes)}
+
+
+_BYTE_DECODER = _gpt2_byte_decoder()
 
 
 # --------------------------------------------------------------------------
@@ -168,7 +179,7 @@ def get_continuations(token_ids, k=8):
     Sends the raw token ids so the model does NOT re-tokenize (avoids drift).
     Uses the /completion endpoint with prompt=<ids>, raw=true, n_predict=1."""
     t = _tokenizer
-    readable = "".join(t.texts[tok] if 0 <= tok < len(t.texts) else "" for tok in token_ids)
+    readable = t.decode_ids(token_ids)
     body = {
         "prompt": token_ids,
         "raw": True,
@@ -333,8 +344,8 @@ def main():
     global _tokenizer
     tk = Tokenizer(GGUF_PATH)
     _tokenizer = tk
-    httpd = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), build_handler(tk))
-    print(f"engram-explorer backend on :{PORT} (vocab={len(tk.tokens)})", flush=True)
+    httpd = http.server.ThreadingHTTPServer((HOST, PORT), build_handler(tk))
+    print(f"engram-explorer backend on {HOST}:{PORT} (vocab={len(tk.tokens)})", flush=True)
     httpd.serve_forever()
 
 
