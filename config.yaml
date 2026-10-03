@@ -72,7 +72,9 @@ hooks:
       # Strata FIRST. Since 2026-10-01 it shares the persistent, swap:false
       # "resident" group with the voice models, so the order no longer decides who
       # survives; Strata first just gives its engine the cards before anything else.
-      - Strata-IQ3XXS
+      # 2026-10-03: Strata-IQ3S while Jim evaluates it (it holds `subagent`); it is
+      # persistent in its own group, so it coexists with the voice models the same way.
+      - Strata-IQ3S
       - whisper-npu-asr
       # s1-mini is tiny (462 MiB) and its load is ~seconds, so preloading it at every
       # llama-swap start keeps Baruch's first dictation warm without startup cost worth
@@ -176,7 +178,8 @@ preload:
   # s1-mini and Q3.8-27B-IQ4XS (the old factory model) were removed from preload:
   # Strata's group is exclusive, so it would evict them straight after they loaded,
   # and the 27B wants the same 3090 + 5070 Ti that Strata holds.
-  - Strata-IQ3XXS
+  # 2026-10-03: Strata-IQ3S while Jim evaluates it (see hooks.on_startup.preload).
+  - Strata-IQ3S
 
 models:
   # ########### #
@@ -798,7 +801,8 @@ models:
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_xxs
     cmd: /home/jim/Strata/run-strata-qwen.sh ${PORT}
-    aliases: [subagent]
+    # `subagent` is on Strata-IQ3S while Jim evaluates it (2026-10-03); move it back
+    # here (and Strata-IQ3XXS back into the preload lists) to return to IQ3_XXS.
     # RUNAWAY GUARD (2026-10-01). A request with NO max_tokens gets the whole context as
     # its output budget (~240K tokens), and Swift can fall into a thinking loop: the
     # librarian curator (ssd-nodes, model `subagent`, no max_tokens, 5-min client
@@ -825,14 +829,21 @@ models:
     #   prompt 4K 1354 | 16K 2399 | 32K 3003 | 100K 3326 tok/s
     #   decode code 99 | prose 80 | explain 91 tok/s; agent (17K + 700) 2264 / 86
     #   = about 10-15% under IQ3_XXS on the fork, about level with official IQ3_XXS.
-    # IT CANNOT RUN BESIDE Strata-IQ3XXS (same 5070 Ti + 3090). Its launcher unloads
-    # Strata-IQ3XXS first (llama-swap will not evict a persistent model for it), and any
-    # request for Strata-IQ3XXS / `subagent` (the curator, the factory) evicts this one
-    # again, since it is not persistent. Expect a ~1 min reload on each switch.
+    # IT CANNOT RUN BESIDE Strata-IQ3XXS (same 5070 Ti + 3090). Both are persistent, so
+    # llama-swap never evicts one for the other: each launcher (run-strata-qwen.sh,
+    # STRATA_OTHER) unloads the other Strata once it is idle, then starts. A request for
+    # Strata-IQ3XXS by name swaps this one out once it is idle, and the next request
+    # here (or to `subagent`) swaps back: ~1 min reload per switch.
+    # PERSISTENT SINCE 2026-10-03: non-persistent, it was evicted by EVERY dictation
+    # request -- llama-swap applies the resident group's `exclusive` on each request to a
+    # member (s1-mini, whisper, chatterbox, clef-flash), not only when one loads.
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_s
     cmd: /home/jim/Strata/run-strata-qwen-iq3s.sh ${PORT}
+    # THE DEFAULT WHILE JIM EVALUATES IQ3_S (2026-10-03, his call): `subagent` (the factory
+    # builder role, the librarian curator) points here, and this is the preloaded Strata.
+    aliases: [subagent]
 
     # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch
     # qwen4exp/mtp @ 53b1389d0 (its 2026-09-18 merge of upstream master) with a real MTP
@@ -2223,11 +2234,14 @@ groups:
   "strata-iq3s":
     swap: true
     exclusive: true
-    persistent: false
+    persistent: true
     # Strata-IQ3S (2026-10-03), for comparison with Strata-IQ3XXS.
-    #   exclusive:true   -> like Strata, loading it frees the 3090 + 5070 Ti of the
-    #                       non-persistent models (the voice stack is persistent: it stays).
-    #   persistent:false -> loading Strata-IQ3XXS (resident, exclusive) evicts it.
-    # Strata-IQ3XXS itself is persistent, so the launcher unloads it (see the entry).
+    #   exclusive:true  -> like Strata, loading it frees the 3090 + 5070 Ti of the
+    #                      non-persistent models (the voice stack is persistent: it stays).
+    #   persistent:true -> nothing evicts it. It was false at first, and then every
+    #                      dictation request evicted it: llama-swap enforces the resident
+    #                      group's `exclusive` on each request to a member, not only on load.
+    # Swapping with Strata-IQ3XXS (also persistent) is done by the launchers: each
+    # unloads the other once it is idle (run-strata-qwen.sh, STRATA_OTHER).
     members:
       - Strata-IQ3S
