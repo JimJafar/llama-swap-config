@@ -2011,6 +2011,46 @@ models:
       --port 8080
     cmdStop: docker stop s1mini
 
+    # --- SYSTEM 1: clef-flash on the ZOTAC with the voice stack (added 2026-10-03) ---
+    # Cloudflare/clef-flash: a Qwen3.5-9B fine-tune (arch qwen35, multimodal) that "turns
+    # a state and a schema of typed questions into decisions"; inputs up to 16,384 tokens
+    # (the card's encode_record default). A System 1 model like s1-mini: thinking OFF.
+    # Prompts should follow Cloudflare's state + schema format -- asked for ad-hoc JSON
+    # it answered correctly but wrote malformed JSON.
+    # QUANT: bartowski IQ4_XS (4.87 GiB, SHA-256 checked). Q5_K_S (6.05 GiB, still in
+    # /mnt/shared/models) does NOT fit beside ComfyUI's text encoder (6.8 GB on this
+    # card), chatterbox and s1-mini: --fit put 24 of 33 layers on the GPU, 10 tok/s.
+    # MEASURED 2026-10-03, IQ4_XS, everything on the ZOTAC: 5125 MiB projected vs 5804
+    # free (card 15.2 of 16.3 GiB, ~1 GiB left for the encoder's activations); warm
+    # prompt 1588 tok/s, decode 76 tok/s.
+    # --fit on + --fit-target 512: normally every layer is on the GPU; if the card is
+    # fuller at load time it offloads layers to the CPU (slow) instead of failing.
+    # Text only: the vision projector (mmproj, 0.92 GB) is not loaded -- no room.
+    # Built with llama.cpp b11279; this image is b11277 and loads it fine (qwen35 is
+    # not a new arch). --reasoning off replaces the deprecated enable_thinking kwarg.
+    # Gemma-4-E4B (on demand, ZOTAC, ~7.5 GiB) cannot share the card with it: loading
+    # this (resident, exclusive) evicts Gemma; requesting Gemma while this is loaded
+    # fails with an out-of-memory error.
+  clef-flash:
+    cmd: |
+      docker run --rm --name clefflash --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Cloudflare_clef-flash-IQ4_XS.gguf
+      --jinja
+      --reasoning off
+      --fit on
+      --fit-target 512
+      -c 16384
+      -fa on
+      -np 1
+      --temp 0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop clefflash
+
     # --- TTS: chatterbox-turbo, permanently resident on the ZOTAC (added 2026-09-12) ---
     # ResembleAI Chatterbox-Turbo distilled to GGUF by cstr and served by CrispASR
     # (C++/ggml; NO Python or PyTorch at runtime). This is NOT a llama.cpp model, so
@@ -2177,6 +2217,9 @@ groups:
       - whisper-npu-asr
       - s1-mini
       - chatterbox-turbo
+      # clef-flash (2026-10-03): the System 1 decision model on the ZOTAC. Not
+      # preloaded: it loads on its first request and then stays, like chatterbox.
+      - clef-flash
   "strata-iq3s":
     swap: true
     exclusive: true

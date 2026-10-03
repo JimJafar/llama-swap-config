@@ -396,6 +396,14 @@
           "maxTokens": 7782
         },
         {
+          "input": [
+            "text"
+          ],
+          "id": "clef-flash",
+          "contextWindow": 16384,
+          "maxTokens": 15564
+        },
+        {
           "id": "chatterbox-turbo",
           "input": [
             "text"
