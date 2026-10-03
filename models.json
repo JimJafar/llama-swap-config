@@ -107,11 +107,11 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "off": "off",
-            "minimal": "low",
+            "minimal": null,
             "low": "low",
             "medium": "medium",
-            "high": "high",
-            "xhigh": null,
+            "high": null,
+            "xhigh": "xhigh",
             "max": null
           },
           "compat": {
@@ -129,11 +129,11 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "off": "off",
-            "minimal": "low",
+            "minimal": null,
             "low": "low",
             "medium": "medium",
-            "high": "high",
-            "xhigh": null,
+            "high": null,
+            "xhigh": "xhigh",
             "max": null
           },
           "compat": {
@@ -151,11 +151,11 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "off": "off",
-            "minimal": "low",
+            "minimal": null,
             "low": "low",
             "medium": "medium",
-            "high": "high",
-            "xhigh": null,
+            "high": null,
+            "xhigh": "xhigh",
             "max": null
           },
           "compat": {

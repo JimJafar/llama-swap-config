@@ -211,20 +211,24 @@ THINKING_WIRING = [
             },
         },
     },
-    # Strata (ids Strata-IQ3XXS / subagent), the Qwen3.8-Flash-Next engine behind a proxy. It is
-    # OpenAI-compatible and takes the standard top-level `reasoning_effort` field
-    # with off/low/medium/high, so thinkingFormat "openai" -- NOT the
-    # chat-template mechanism used above, and no chat-template kwargs at all. It
-    # does not understand the `developer` role, so pi must send `system`.
+    # Strata (ids Strata-IQ3XXS / Strata-IQ3S / subagent), the Qwen3.8-Flash-Next engine
+    # behind a proxy. It is OpenAI-compatible and takes the standard top-level
+    # `reasoning_effort` field, so thinkingFormat "openai" -- NOT the chat-template
+    # mechanism used above, and no chat-template kwargs at all. It does not
+    # understand the `developer` role, so pi must send `system`.
+    # LEVELS (2026-10-03): Qwen3.8's chat template supports exactly low, medium and
+    # xhigh (its default), and maps `high` to xhigh (raise_exception on anything else).
+    # Checked live: Strata passes `xhigh` through. So pi shows off/low/medium/xhigh;
+    # minimal and high are hidden -- they were only aliases for low and xhigh.
     {
         "marker": "strata",
         "defaultLevel": "medium",   # Strata serves Qwen3.8-Flash-Next models
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {
-                "off": "off", "minimal": "low", "low": "low",
-                "medium": "medium", "high": "high",
-                "xhigh": None, "max": None,
+                "off": "off", "minimal": None, "low": "low",
+                "medium": "medium", "high": None,
+                "xhigh": "xhigh", "max": None,
             },
             "compat": {
                 "supportsDeveloperRole": False,
