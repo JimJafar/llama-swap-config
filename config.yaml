@@ -708,6 +708,11 @@ models:
     cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 262144
 
   Strata-IQ3XXS:
+    # 2026-10-03: ENGINE 0.1.37, AND IT NOW RUNS THE marvin-tuned FORK (~/Strata-marvin,
+    # selected by ~/Strata/variant.env; engine config strata-iq3_xxs-marvin.json there):
+    # a pinned hot-expert RAM tier across the split. vs official 0.1.37: prompts +44..+115%,
+    # decode +12..+20%, ~20 GiB pinned. ~/Strata-marvin/MARVIN.md has the what and why; the
+    # notes below describe the official setup (delete variant.env to return to it).
     # 2026-10-01: NOW THE BASE MODEL. Qwen3.8-Flash-Next GSQ-RCO IQ3_XXS (ISTA-DASLab),
     # engine 0.1.31, launcher run-strata-qwen.sh, engine config strata-iq3_xxs.json
     # (its header lists the hand edits on top of setup). Renamed from
@@ -807,6 +812,27 @@ models:
     # strata-iq3_xxs.shared-settings.json ("max_tokens": 16384). The filter only checked
     # max_tokens, so it also stamped requests that send max_completion_tokens (pi);
     # Strata fills the default only when a request has neither.
+
+  Strata-IQ3S:
+    # 2026-10-03, FOR COMPARISON WITH Strata-IQ3XXS (Jim is trying both before choosing).
+    # Qwen3.8-Flash-Next GSQ-RCO IQ3_S, the bigger quant ("matches the full model"), on
+    # the marvin-tuned fork: engine config ~/Strata-marvin/strata-iq3_s-marvin.json
+    # (--resident-budget-gib 30 -> 27.8 GiB pinned, ~16 GiB RAM left available;
+    # --vram-reserve-mib 957, as the engine asked). Files in /mnt/shared/models/
+    # Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S; shard 2 (the PLE/engram table) is a symlink to the
+    # IQ3_XXS one -- the same file (same SHA-256) for every size.
+    # MEASURED (2026-10-03, same harness as Strata-IQ3XXS):
+    #   prompt 4K 1354 | 16K 2399 | 32K 3003 | 100K 3326 tok/s
+    #   decode code 99 | prose 80 | explain 91 tok/s; agent (17K + 700) 2264 / 86
+    #   = about 10-15% under IQ3_XXS on the fork, about level with official IQ3_XXS.
+    # IT CANNOT RUN BESIDE Strata-IQ3XXS (same 5070 Ti + 3090). Its launcher unloads
+    # Strata-IQ3XXS first (llama-swap will not evict a persistent model for it), and any
+    # request for Strata-IQ3XXS / `subagent` (the curator, the factory) evicts this one
+    # again, since it is not persistent. Expect a ~1 min reload on each switch.
+    checkEndpoint: /health
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: qwen3.8-flash-next-iq3_s
+    cmd: /home/jim/Strata/run-strata-qwen-iq3s.sh ${PORT}
 
     # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch
     # qwen4exp/mtp @ 53b1389d0 (its 2026-09-18 merge of upstream master) with a real MTP
@@ -2151,3 +2177,14 @@ groups:
       - whisper-npu-asr
       - s1-mini
       - chatterbox-turbo
+  "strata-iq3s":
+    swap: true
+    exclusive: true
+    persistent: false
+    # Strata-IQ3S (2026-10-03), for comparison with Strata-IQ3XXS.
+    #   exclusive:true   -> like Strata, loading it frees the 3090 + 5070 Ti of the
+    #                       non-persistent models (the voice stack is persistent: it stays).
+    #   persistent:false -> loading Strata-IQ3XXS (resident, exclusive) evicts it.
+    # Strata-IQ3XXS itself is persistent, so the launcher unloads it (see the entry).
+    members:
+      - Strata-IQ3S

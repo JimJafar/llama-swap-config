@@ -73,7 +73,9 @@ CONTEXT_OVERRIDES: dict[str, int] = {}
 # `args` is the real limit. Read it at sync time rather than hard-coding it here (a
 # hard-coded 65536 went stale when Swift moved to 262144 on 2026-09-30).
 STRATA_CONFIGS: dict[str, Path] = {
-    "Strata-IQ3XXS": Path.home() / "Strata" / "strata-iq3_xxs.json",
+    # 2026-10-03: both run the marvin-tuned fork (~/Strata-marvin, see ~/Strata/variant.env)
+    "Strata-IQ3XXS": Path.home() / "Strata-marvin" / "strata-iq3_xxs-marvin.json",
+    "Strata-IQ3S": Path.home() / "Strata-marvin" / "strata-iq3_s-marvin.json",
 }
 
 
