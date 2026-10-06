@@ -18,8 +18,9 @@
 # review, not by yamllint. Re-enable by deleting the `ignore` key there.
 
 # llama-swap runs as a host binary (llama-swap-bin AUR). Most model backends run
-# as Docker containers: llama.cpp uses the mostlygeek image with its entrypoint
-# overridden to /app/llama-server, while vLLM uses the vllm image. Strata runs
+# as Docker containers: llama.cpp uses the official ggml-org server-cuda13 image
+# (entrypoint /app/llama-server; every llama.cpp entry since 2026-10-06), while vLLM uses
+# the vllm image. Strata runs
 # as a host process through its launcher scripts. ${PORT} is assigned by
 # llama-swap; containers publish it, while host processes bind it directly.
 # cmdStop or default SIGTERM handling stops the backend and frees VRAM.
@@ -46,11 +47,11 @@
 #   none`. "--mlock" in the notes above means --load-mode mlock.
 #
 # IMAGE POLICY (2026-09-07): do NOT pin llama.cpp / vLLM / llama-swap builds. Everything
-# tracks mainline "latest": official ggml-org llama.cpp uses the rolling server-cuda13 tag;
-# llama-swap's bundled image is its rolling :cuda tag. These tags only advance when you
-# `docker pull`, so include image pulls in the normal update step. The one deliberate
-# exception is a local fork build (local/llama-swap:...) while its feature is still unmerged;
-# revert it to mainline latest the moment the feature lands.
+# tracks mainline "latest": every llama.cpp entry uses the official ggml-org rolling
+# server-cuda13 tag (2026-10-06: the last entries moved off llama-swap's bundled :cuda image,
+# which lagged ~150 builds). The tag only advances when you `docker pull`, so include image
+# pulls in the normal update step. A fork build is allowed only while its feature is
+# unmerged; revert it to mainline latest the moment the feature lands (none remain).
 #
 # Max seconds to wait for a model to become ready after launch. Raised from the 120s
 # default for the vLLM entries (e.g. qwen36-27b-nvfp4), which take ~180s to load + capture graphs.
@@ -187,7 +188,7 @@ models:
       docker run --rm --name q35b --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf
 
       # fixed chat template
@@ -232,7 +233,7 @@ models:
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       # known-good image build: b9692
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
 
       # fixed chat template
@@ -297,7 +298,7 @@ models:
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       # known-good image build: b9692
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
       # this build takes --lora FNAME / --lora-scaled FNAME:SCALE (no -l, no space scale)
       --lora-scaled /models/curator-qwen35-9b-grooming-100-r8-lora-f16.gguf:1.0
@@ -342,7 +343,7 @@ models:
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       # known-good image build: b9692
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
       # this build takes --lora FNAME / --lora-scaled FNAME:SCALE (no -l, no space scale)
       --lora-scaled /models/curator-qwen35-9b-harvesting-100-r8-lora-f16.gguf:1.0
@@ -430,11 +431,8 @@ models:
       --load-mode none
 
       # draft speculation - ngram
-      # Official latest llama.cpp (server-cuda13, build >=10666) -- Qwen3.8-Flash-Next
-      # (qwen4exp) MODEL support merged in PR #27742, but the MTP draft graph (PR #27739)
-      # is NOT in the official image, so no draft-mtp here. MTP was trialled via a patched
-      # build but gave ~0 speedup (12 t/s; the 51 GiB PLE n-gram table dominates per-token
-      # cost and MTP only skips transformer layers), so it was reverted. ngram fallback kept.
+      # ngram only, deliberately: qwen4exp MTP has been in mainline since 2026-10-01 (#29761)
+      # and lives in the Q3.8-FN-AC-IQ4XS-MTP entry; this entry stays its no-MTP reference.
       --spec-type ngram-mod
       --spec-ngram-mod-n-match 24
       --spec-ngram-mod-n-min 24
@@ -502,11 +500,8 @@ models:
       --load-mode none
 
       # draft speculation - ngram
-      # Official latest llama.cpp (server-cuda13, build >=10666) -- Qwen3.8-Flash-Next
-      # (qwen4exp) MODEL support merged in PR #27742, but the MTP draft graph (PR #27739)
-      # is NOT in the official image, so no draft-mtp here. MTP was trialled via a patched
-      # build but gave ~0 speedup (12 t/s; the 51 GiB PLE n-gram table dominates per-token
-      # cost and MTP only skips transformer layers), so it was reverted. ngram fallback kept.
+      # ngram only, deliberately: qwen4exp MTP has been in mainline since 2026-10-01 (#29761)
+      # and lives in the Q3.8-FN-AC-IQ4XS-MTP entry; this entry stays its no-MTP reference.
       --spec-type ngram-mod
       --spec-ngram-mod-n-match 24
       --spec-ngram-mod-n-min 24
@@ -988,8 +983,11 @@ models:
     # 256 until graph_reserve stops OOMing on device0. The 5070 (device1) carries ~600
     # MiB of desktop and will be the wall. Realistic ceiling looks like ~64-128K.
     #
-    # KV: q8_0 kept (validated with -sm tensor at b10362). If a future image rejects
-    # quantized KV + tensor mode (current master does), switch -ctk/-ctv to f16.
+    # KV: q8_0 kept (validated with -sm tensor at b10362, and again at b11434 on the ggml-org
+    # image, 2026-10-06). If a future image rejects quantized KV + tensor mode, use f16.
+    # IMAGE (2026-10-06): moved from mostlygeek :cuda (b11277) to ggml-org server-cuda13
+    # (b11434); same speed, 2 reps: short decode ~95 t/s, 59K prompt read ~1100 t/s,
+    # decode 61.7 -> 63.9 t/s.
     #
     # MTP: VERIFIED 2026-08-16 (GGUF header parse) -- this file DOES ship the 4
     # nextn tensors (blk.64.nextn.{eh_proj,enorm,hnorm,shared_head_norm}). The
@@ -1010,7 +1008,7 @@ models:
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.8-27B-UD-Q6_K_M.gguf
       --mmproj /models/qwen3.8-mmproj-BF16.gguf
 
@@ -1586,7 +1584,7 @@ models:
       docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/gemma-4/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
 
@@ -1637,7 +1635,7 @@ models:
       docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/gemma-4/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
 
@@ -1674,7 +1672,7 @@ models:
       docker run --rm --name ge4bmtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/gemma-4/gemma-4-E4B-it-UD-Q4_K_XL.gguf
       -md /models/gemma-4/mtp-gemma-4-E4B-it-BF16.gguf
 
@@ -1715,7 +1713,7 @@ models:
       docker run --rm --name bge --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/bge-m3-FP16.gguf
       --host 0.0.0.0
       --port 8080
@@ -1836,7 +1834,7 @@ models:
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       # known-good image build: b9692
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-2B-UD-Q4_K_XL.gguf
       --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
       --chat-template-kwargs "{\"enable_thinking\": false}"
@@ -1885,7 +1883,7 @@ models:
       docker run --rm --name s1mini --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/s1-mini-q4_k_m.gguf
       # S1 contract: built-in Qwen3 template via --jinja with thinking OFF
       # (the exact recipe from the model card's llama.cpp section).
@@ -1929,7 +1927,7 @@ models:
       docker run --rm --name clefflash --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Cloudflare_clef-flash-IQ4_XS.gguf
       --jinja
       --reasoning off
