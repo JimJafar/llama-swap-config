@@ -19,8 +19,8 @@
 
 # llama-swap runs as a host binary (llama-swap-bin AUR). Most model backends run
 # as Docker containers: llama.cpp uses the mostlygeek image with its entrypoint
-# overridden to /app/llama-server, while vLLM uses the vllm image. Q3.8-FN-EXL3
-# is a host TabbyAPI process in an isolated Python venv. ${PORT} is assigned by
+# overridden to /app/llama-server, while vLLM uses the vllm image. Strata runs
+# as a host process through its launcher scripts. ${PORT} is assigned by
 # llama-swap; containers publish it, while host processes bind it directly.
 # cmdStop or default SIGTERM handling stops the backend and frees VRAM.
 #
@@ -135,22 +135,16 @@ hooks:
 #   the -sm tensor TP pair put the 3090 FIRST (CUDA0/--main-gpu 0) and bias      #
 #   --tensor-split toward it so it carries most weights + the larger KV share.   #
 #   CUDA order is fastest-first; 3090 is CUDA0 and ZOTAC is last.              #
-#   Most profiles list only the three compute UUIDs above. Tabby Qwen EXL3 is  #
-#   the four-GPU exception and lists the ZOTAC last.
+#   Profiles list only the three compute UUIDs above; the ZOTAC is kept for     #
+#   the voice stack.
 #                                                                                #
-# >>> ZOTAC VOICE-RESERVED; TABBY QWEN EXCEPTION (2026-09-25) <<<
+# >>> ZOTAC VOICE-RESERVED <<<
 #   s1-mini (~1.5 GiB) and chatterbox-turbo (~1.6 GiB) remain loaded here.
-#   Q3.8-FN-EXL3 uses a 7.5 GiB split alongside those services (was 10.5 GiB).
-#   Measured after the rebalance: ~6.1 GiB free, up from ~2.4 GiB.
-#   Gemma E4B (4.9 GiB weights) coexists ONLY because its context is 102400.
-#   At its former -c 262144 it needed 8.2 GiB and could not fit beside Qwen;
-#   at -c 131072 it still fails. See the gemma-4-E4B-MTP cmd.
+#   Gemma E4B's -c 102400 was sized to fit beside the four-GPU Tabby Qwen EXL3
+#   entry's 7.5 GiB ZOTAC split; that entry was deleted 2026-10-06.
 #   qwen-clean-2b and parakeet-asr remain unlisted, on-demand fallbacks.
-#   Do not load them while Qwen uses ZOTAC. Other profiles exclude af5bd53f.
+#   Other profiles exclude af5bd53f.
 #   Five former ZOTAC models moved to MSI on 2026-09-12.
-#   Other DeepSeek / Flash-Next --fit and MTP entries remain 3-GPU. Tabby
-#   Qwen EXL3 is the four-GPU exception; it trades headroom for zero CPU MoE
-#   offload at the configured 256K context.
 ##################################################################################
 
 # NOTE 2026-09-30: this top-level `preload:` key is NOT read by llama-swap -- the
@@ -160,11 +154,8 @@ preload:
   # Large GPU models are loaded on demand so whole-machine models such as
   # Qwen3.8-Flash-Next can fit without startup contention.
   #
-  # ZOTAC hosts voice services; Tabby Qwen EXL3 may use 7.5 GiB here.
-  # Gemma E4B is capped at -c 102400 so it fits beside Qwen; s1-mini and
-  # chatterbox can stay. Raising Gemma's context or Qwen's split breaks this.
-  # qwen-clean-2b and parakeet-asr are on-demand fallbacks; do not load while
-  # Qwen uses the ZOTAC. Other profiles stay pinned away from this card.
+  # ZOTAC hosts voice services. qwen-clean-2b and parakeet-asr are on-demand
+  # fallbacks. Other profiles stay pinned away from this card.
   # A preloaded model must be in a persistent group, or it can be evicted.
   #
   # NOTE: `preload` only works for CHAT-shaped backends. llama-swap warms a preloaded
@@ -693,22 +684,6 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop qwen38-swift-iq3
-
-    # Qwen3.8 EXL3 / TabbyAPI four-GPU trial; Q8 cache, 256K context.
-    # CPU MoE offload disabled; shared ZOTAC split capped at 7.5 GiB.
-    # Short zero-offload request passed with 256K configured; boundary untested.
-    # On-demand profile; TabbyAPI's default config remains unchanged.
-    # Tabby auth is disabled per request; llama-swap has no per-model auth gate.
-    # Endpoint is loopback-only and browser CORS is disabled.
-  Q3.8-FN-EXL3:
-    checkEndpoint: /health
-    proxy: http://127.0.0.1:${PORT}
-    useModelName: Qwen3.8-Flash-Next-exl3
-    env:
-      - PYTHONUNBUFFERED=1
-      - TABBY_LOG_LEVEL=WARNING
-    # Launcher sets a private umask and runs TabbyAPI in its app directory.
-    cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 262144
 
   Strata-IQ3XXS:
     # 2026-10-03: ENGINE 0.1.37, AND IT NOW RUNS THE marvin-tuned FORK (~/Strata-marvin,
@@ -1710,8 +1685,8 @@ models:
       --spec-draft-n-max 2
       -ngl 99
       -ngld 99
-      # 102400 (100K), not the model's native 131072: this is what lets Gemma
-      # sit beside the Tabby Qwen EXL3 split on the ZOTAC. Gemma VRAM is linear
+      # 102400 (100K), not the model's native 131072: this let Gemma sit beside
+      # the Tabby Qwen EXL3 split on the ZOTAC (entry deleted 2026-10-06). Gemma VRAM is linear
       # in context (3453 MiB + 0.018074*tokens, measured); 100K needs ~5304 MiB
       # of the ~5625 MiB left by Qwen. 131072 does NOT fit (-198 MiB).
       -c 102400
@@ -2043,9 +2018,7 @@ groups:
     # "gemma-resident" group with the voice stack (see "resident" below).
     #   exclusive:false  -> requesting it evicts nothing; it loads beside the residents.
     #   persistent:false -> any exclusive load (e.g. a "resident" member) unloads it.
-    # Qwen's 7.5 GiB split coexists with Gemma E4B only at -c 102400.
-    # qwen-clean-2b and parakeet-asr remain unlisted on-demand fallbacks; do not load
-    # them while Qwen EXL3 uses the ZOTAC.
+    # qwen-clean-2b and parakeet-asr remain unlisted on-demand fallbacks.
     members:
       - gemma-4-E4B-MTP
   # "factory-resident" (persistent, held Q3.8-27B-IQ4XS on the 3090 + 5070 Ti)
@@ -2105,8 +2078,6 @@ groups:
       # non-MTP entries were: an ungrouped 3-card request does not swap and
       # can oversubscribe VRAM.
       - Q3.8-FN-Swift-IQ3_XXS
-      # EXL3 uses these compute GPUs; swap with Qwen3.8 workloads.
-      - Q3.8-FN-EXL3
   "resident":
     swap: false
     exclusive: true

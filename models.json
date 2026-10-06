@@ -70,34 +70,6 @@
           }
         },
         {
-          "id": "Q3.8-FN-EXL3",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 262144,
-          "maxTokens": 249036,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          }
-        },
-        {
           "id": "Strata-IQ3XXS",
           "input": [
             "text"
