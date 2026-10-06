@@ -6,42 +6,6 @@
       "apiKey": "llama-swap",
       "models": [
         {
-          "id": "Q3.6-35B-Q4",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 128000,
-          "maxTokens": 121600,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          }
-        },
-        {
-          "id": "Q3.5-9B-Q4",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 250000,
-          "maxTokens": 237500,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          }
-        },
-        {
           "input": [
             "text"
           ],

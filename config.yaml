@@ -178,115 +178,17 @@ models:
   # QWEN MODELS #
   # ########### #
 
-  Q3.6-35B-Q4:
-    # MoE + MTP (2026-06-12): ~119 -> ~168 t/s decode (+41%) via the MTP-enabled GGUF
-    # (Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf from unsloth/Qwen3.6-35B-A3B-MTP-GGUF) plus
-    # --spec-type draft-mtp. Fastest model here, ~3x the vLLM 27B; n-max 2 per Unsloth
-    # docs. (The non-MTP fallback GGUF was deleted 2026-07-21 to free disk; only the
-    # -MTP GGUF this entry runs remains.)
-    cmd: |
-      docker run --rm --name q35b --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
-      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf
-
-      # fixed chat template
-      --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
-
-      --spec-type draft-mtp
-      --spec-draft-n-max 2
-      --fit on
-      --fit-ctx 128000
-      --fit-target 256
-      -np 1
-      -fa on
-      --load-mode mlock
-      -b 2048
-      -ub 2048
-      -ctk q8_0
-      -ctv q8_0
-      --temp 0.6
-      --top-p 0.95
-      --top-k 20
-      --min-p 0.0
-      --presence-penalty 0.0
-      --repeat-penalty 1.0
-      --reasoning-format none
-      --reasoning-budget -1
-      --chat-template-kwargs "{\"preserve_thinking\": true}"
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop q35b
-
-    # Q4 member of the qwen35 family. Switched 2026-08-22 from Qwen3.5-9B-Q4_1.gguf
-    # to unsloth's UD-Q4_K_XL requant (~5.6 GB) -- finer per-block scaling, roughly
-    # same size. ngram-mod speculation below (NO MTP: this GGUF, like the Q4_1/Q8_0
-    # builds and every file in unsloth/Qwen3.5-9B-GGUF, ships no nextn tensors --
-    # verified 2026-08-22: 427 tensors, blk.0-31 only. --spec-type draft-mtp would
-    # abort at load; see the Q8 entry note). ZOTAC-pinned like the Q8 entry;
-    # weights ~5.6 GB + KV + dictation ~1.7 GB still fits 16 GB.
-  Q3.5-9B-Q4:
-    cmd: |
-      docker run --rm --name q9bq4 --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
-      # known-good image build: b9692
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
-
-      # fixed chat template
-      --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
-
-      -ngl 99
-      -c 250000
-      -fa on
-      -np 2
-      --load-mode none
-      -b 2048
-      -ub 2048
-
-      # draft speculation - ngram only (NO MTP: no nextn tensors in this
-      # GGUF -- would abort at load). ngram-mod window retuned 2026-08-22
-      # from the 27B sibling's 24/24/86 after a live probe measured 13.7%
-      # draft acceptance (32/234) -- long ngrams barely match this model's
-      # output. Re-check the "draft acceptance" line in the logs; if it's
-      # still <~30%, drop speculation entirely.
-
-      --spec-type ngram-mod
-      --spec-ngram-mod-n-match 24
-      --spec-ngram-mod-n-min 12
-      --spec-ngram-mod-n-max 32
-
-      --temp 1.0
-      --top-p 0.95
-      --top-k 20
-      --min-p 0.0
-      --presence-penalty 1.5
-      --repeat-penalty 1.0
-      --reasoning off
-      --reasoning-format deepseek
-      --chat-template-kwargs "{\"preserve_thinking\": false}"
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop q9bq4
-
     # CURATOR LoRA ENTRIES (added 2026-08-21): The Librarian's curator, task-specific
     # rank/alpha-8 adapters on Qwen3.5-9B (Unsloth Studio SFT, completion-only, non-
     # thinking data). The 100-case grooming adapter beat its 250/500-case siblings in
     # blind review; harvesting's 100-case adapter lifted F1 78.2 -> 80.8. See
     # "How to get big results from a tiny model" (Writing/Published/AI/...).
     #
-    # llama.cpp loads the adapter with --lora-scaled <gguf>:1.0 on top of the SAME
-    # base as the Q3.5-9B-Q4 entry above (Qwen3.5-9B-UD-Q4_K_XL.gguf, switched
-    # from Q4_1 on 2026-08-22). (This build has no -l short flag / space
-    # scale -- plain `--lora FNAME` also works.) The r8 adapters are ~29 MB, so VRAM/
-    # coexistence math follows the plain 9B entry (ZOTAC, ~7 GB +
-    # dictation's ~1.7 GB fits the 16 GB card).
-    # The three entries (plain + these two) swap with each other on request; only
-    # one 9B can be resident at a time (same ZOTAC card).
+    # llama.cpp loads the adapter with --lora-scaled <gguf>:1.0 on top of
+    # Qwen3.5-9B-UD-Q4_K_XL.gguf (switched from Q4_1 on 2026-08-22). The plain
+    # Q3.5-9B-Q4 entry was deleted 2026-10-06; the file STAYS as these entries' base.
+    # (This build has no -l short flag / space scale -- plain `--lora FNAME` also
+    # works.) The r8 adapters are ~29 MB, so a curator needs ~7 GB of VRAM.
     #
     # Thinking is pinned OFF ("enable_thinking": false) to match the training data --
     # same trick as qwen-clean-2b. pi's qwen3.5 wiring (sync-models.py) can still
@@ -2028,22 +1930,12 @@ groups:
   # was REMOVED 2026-09-30: Strata is the only persistent model, and two persistent
   # models on the same cards cannot evict each other. The 27B went back into
   # qwen38-workload with the other models on those cards.
-  "qwen35-9b":
-    swap: true
-    exclusive: false
-    persistent: false
-    # STOP UNGROUPED EVICTION (2026-09-13). Q3.5-9B-Q4 moved from ZOTAC to
-    # MSI (57bbb375) on 2026-09-12 but stayed out of every group. Ungrouped
-    # loading evicts residents; this caused the factory model to vanish mid-Task
-    # (see gemma-resident and the chatterbox-turbo precedent).
-    #   exclusive:false -> this group does not evict other models when it loads.
-    # It shares no card with the factory model (MSI vs 3090 + 5070 Ti).
-    # NOTE: other models are still ungrouped and carry the same hazard --
-    # Q3.6-35B-Q4, laguna-s-2.1-mainline, muse-glimmer-30B-dflash-vision,
-    # gemma-4-31B-Q4-MTP, gemma-4-26B-MoE-MTP.
-    # Give them a group too if they start evicting residents.
-    members:
-      - Q3.5-9B-Q4
+  # UNGROUPED EVICTION HAZARD (2026-09-13): loading an ungrouped model evicts
+  # residents (it made the factory model vanish mid-task). The "qwen35-9b" group
+  # (exclusive:false) existed to stop the plain 9B doing that; it was removed with that
+  # entry on 2026-10-06. Still ungrouped and carrying the same hazard:
+  # muse-glimmer-30B-dflash-vision, gemma-4-31B-Q4-MTP, gemma-4-26B-MoE-MTP and the
+  # two curator entries. Give them a group if they start evicting residents.
   "qwen38-workload":
     swap: true
     exclusive: false
