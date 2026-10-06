@@ -1514,8 +1514,13 @@ models:
     # (~1.6 GB) and vision projector (~1.4 GB). The model card calls the speculative
     # companion DFlash (not DSpark); both companions can run together.
     #
-    # RUNTIME: Muse Glimmer requires llama.cpp b10353+. Pin official CUDA 13 b10775,
-    # rather than mostlygeek:cuda (which may lag the required architecture support).
+    # RUNTIME: Muse Glimmer requires llama.cpp b10353+ (the rolling server-cuda13 image).
+    # FILES live in /mnt/shared/models/muse-glimmer (the mount was still /mnt/models, so the
+    # entry could not load, until 2026-10-06).
+    # MEASURED 2026-10-06 (b11434, 2 reps, temp 0, through llama-swap, DFlash on):
+    #   short prompt, 2K-token answer: decode 69 t/s (drafts ~77% accepted)
+    #   55K-token prompt: read 1368 t/s, decode 48.5 t/s
+    # vs Q3.8-27B-Q6KM (3090 + 5070 Ti, -sm tensor, MTP): 95 / 1100 / 63 t/s.
     #
     # GPU PLACEMENT: UUID pinning exposes only the two CPU-PEG Gen5 x8 cards, in
     # 5070 Ti / MSI 5060 Ti order. The ZOTAC 5060 Ti on the x4 M.2 adapter is excluded.
@@ -1536,7 +1541,7 @@ models:
     cmd: |
       docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/models:/models
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server
       ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
