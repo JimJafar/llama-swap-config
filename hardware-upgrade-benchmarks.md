@@ -32,7 +32,7 @@ the H12SSL's. So the gain comes from link width, not link speed.
 | llama.cpp | `ghcr.io/ggml-org/llama.cpp:server-cuda13`, build 11515 (commit 3d65c90d0), pulled 2026-10-09 |
 | Strata | marvin-tuned fork on upstream **v0.1.41**: `~/Strata-marvin`, branch `marvin-tuned-0.1.41`, commit `d7b05f7`, engine built 2026-10-09 (sm 86;120) |
 | ComfyUI | 0.38.0 (`b65d1ffa`), PyTorch 2.14.1+cu130, ComfyUI-GGUF `6ea2651` |
-| Input checksums (sha256, first 16) | `test-30K.md` 0280e0223ac0ac62 · `llm_bench.py` 0a0601696d414146 · `image_bench.py` d6dc5cf1faaaad02 · `disk.sh` 783c64869c076d8b · `mem_bw.c` c3c5fe58ac6ec3f9 · `pcie_bw.py` 42b19046af083b9c |
+| Input checksums (sha256, first 16) | `test-30K.md` 0280e0223ac0ac62 · `llm_bench.py` 513606232264132f (0a0601696d414146 before the unload step was added) · `image_bench.py` d6dc5cf1faaaad02 · `disk.sh` 783c64869c076d8b · `mem_bw.c` c3c5fe58ac6ec3f9 · `pcie_bw.py` 42b19046af083b9c |
 
 Conditions:
 - The machine was otherwise idle. An orphaned headless Chromium burning 15 cores since
@@ -86,7 +86,10 @@ ComfyUI unloaded everything first, so it includes loading the models.
 
 ## LLMs (`bench/llm_bench.py`, through llama-swap)
 
-The speeds are the server's own figures, in tokens per second.
+The speeds are the server's own figures, in tokens per second. The first five rows
+were measured at 21:04–21:10 and the last four at 22:15–22:23. The DF2 entry and the
+second gemma-4-E4B run used the version of `llm_bench.py` that unloads other models
+first; for the earlier rows the other models were unloaded by hand.
 
 | Model | GPUs | Load | Short prompt → 2048 tok: decode (draft accept) | 29K prompt: prefill / time to first token | 29K prompt: decode (draft accept) |
 |---|---|---|---|---|---|
@@ -95,16 +98,22 @@ The speeds are the server's own figures, in tokens per second.
 | Q3.8-27B-Q6KM (-sm tensor, MTP) | 3090 + 5070 Ti | 19.2 s | 63.0 (41%) | 1281 / 23.2 s | 75.5 (46%) |
 | muse-glimmer-30B-dflash-vision | 5070 Ti + MSI | 14.0 s | 43.7 (37%) | 1446 / 20.5 s | 68.2 (79%) |
 | gemma-4-31B-Q4-MTP | 5070 Ti + MSI | 35.9 s | 45.5 (48%) | 1417 / 20.3 s | 52.9 (89%) |
-| Q3.8-27B-IQ4XS-DF2 | MSI + 5070 Ti | **failed** | — | — | — |
+| Q3.8-27B-IQ4XS-DF2 (layer split, DFlash2 draft) | MSI + 5070 Ti | 6.0 s | 55.2 (33%) | 1288 / 22.9 s | 69.7 (51%) |
+| Q3.8-FN-AC-IQ4XS-MTP | 5070 Ti + MSI + 3090 | 25.0 s | 45.9 (38%) | 544 / 54.0 s | 47.0 (41%) |
+| gemma-4-26B-MoE-MTP | MSI | 23.5 s | 43.2 (63%) | 532 / 53.8 s | 48.6 (92%) |
+| gemma-4-E4B-MTP | ZOTAC (beside the voice stack) | 4.5 s | 114.6 (42%) | 3959 / 7.3 s | 115.7 (83%) |
 
 Notes:
 - **Load times** were measured with the model files probably already in the page
   cache, so they are not cold-disk times. Strata's includes building its RAM expert
   tier.
-- **Q3.8-27B-IQ4XS-DF2 cannot start.** Its draft model
-  `/mnt/shared/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf` no longer exists on any drive,
-  so llama-server exits ("failed to open GGUF file"). The entry needs the file back, or
-  it should be removed.
+- **The DF2 draft was missing and has been downloaded again.**
+  `/mnt/shared/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf` is the Q4_K_M from
+  [incoai/Qwen3.8-27B-DFlash2-GGUF](https://huggingface.co/incoai/Qwen3.8-27B-DFlash2-GGUF)
+  (1,143,006,816 bytes, sha256 `1a25c56858e1ebe9...`), fetched on 2026-10-09.
+- **DF2 is slower than its MTP sibling.** The DFlash2 draft (layer split) decodes at
+  55 and 70 t/s, against 74 and 84 t/s for Q3.8-27B-IQ4XS (tensor split, MTP).
+- **The Flash-Next and gemma-26B models read long prompts slowly** (about 540 t/s).
 - **Decode speed with speculative decoding depends on the content.** A summary of
   provided text drafts well (up to 89% accepted), while the open-ended essay drafts
   poorly. Compare like with like.

@@ -5,7 +5,7 @@ These scripts produced the "before" numbers in
 Core Ultra 7 265KF / Z890 / 64 GB DDR5-6000). Run them unchanged on the new platform
 (EPYC 7443 / H12SSL-NT / 256 GB DDR4-2666) and add an "after" column to that document.
 
-Total run time is about 25 minutes.
+Total run time is about 30 minutes.
 
 ## Rules for a fair comparison
 
@@ -127,15 +127,23 @@ Prompt:
 The images are saved as `ComfyUI/output/hwbench-*`. Compare them by eye with the
 baseline files: different hardware can change pixels slightly, but not the picture.
 
-## 5. LLMs (about 15 minutes)
+## 5. LLMs (about 20 minutes)
 
 ```sh
 cd ~/llama-swap
-python3 bench/llm_bench.py Strata-IQ3S
-curl -X POST localhost:8033/api/models/unload/Strata-IQ3S
-python3 bench/llm_bench.py Q3.8-27B-IQ4XS Q3.8-27B-Q6KM Q3.8-27B-IQ4XS-DF2 \
-    muse-glimmer-30B-dflash-vision gemma-4-31B-Q4-MTP
+python3 bench/llm_bench.py Strata-IQ3S Q3.8-27B-IQ4XS Q3.8-27B-Q6KM Q3.8-27B-IQ4XS-DF2 \
+    muse-glimmer-30B-dflash-vision gemma-4-31B-Q4-MTP \
+    Q3.8-FN-AC-IQ4XS-MTP gemma-4-26B-MoE-MTP gemma-4-E4B-MTP
 ```
+
+Before each model the script unloads every other running model except the voice stack
+(whisper-npu-asr, s1-mini, chatterbox-turbo), Strata included. This is needed because
+some llama-swap groups don't evict: on the first DF2 attempt, gemma-4-26B was still on
+the MSI card and DF2 ran out of memory.
+
+Q3.8-27B-IQ4XS-DF2 needs its draft at `/mnt/shared/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf`.
+This is the Q4_K_M from `incoai/Qwen3.8-27B-DFlash2-GGUF`, sha256
+`1a25c56858e1ebe93f2718ac1d49d1151f9323325c1bbfd6209370f4db131ebd`.
 
 Requests go through llama-swap (`127.0.0.1:8033`), so each model runs exactly as
 configured. For each model the script runs:

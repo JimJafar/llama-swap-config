@@ -4,6 +4,7 @@ long prompt (~30K tokens) + short generation.
 
 Usage: bench/llm_bench.py MODEL [MODEL...] [--base URL] [--out results.jsonl]
 
+Before each model, every other running model except the voice stack is unloaded.
 Each prompt starts with a random nonce, so no prefix cache is reused. Speeds come
 from llama-server's own `timings` when the backend returns them, otherwise from the
 client clock (prefill = prompt tokens / time to first token, decode = tokens after the
@@ -85,6 +86,23 @@ def chat(base, model, prompt, max_tokens, timeout=1800):
     return res
 
 
+# The voice stack (ZOTAC + NPU) stayed loaded in the 2026-10-09 baseline.
+KEEP = ("whisper-npu-asr", "s1-mini", "chatterbox-turbo")
+
+
+def unload_others(base, model):
+    """Unload every running model except the voice stack and `model`. Some llama-swap
+    groups don't evict (qwen38-workload, gemma-ondemand) and Strata is persistent,
+    so without this a model can fail to load or share its GPUs."""
+    with urllib.request.urlopen(f"{base}/running", timeout=30) as r:
+        running = [m["model"] for m in json.loads(r.read())["running"]]
+    for m in running:
+        if m not in KEEP and m != model:
+            urllib.request.urlopen(urllib.request.Request(
+                f"{base}/api/models/unload/{m}", method="POST"), timeout=120).read()
+    time.sleep(5)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("models", nargs="+")
@@ -95,8 +113,9 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     for model in a.models:
         rec = {"model": model, "date": time.strftime("%Y-%m-%d %H:%M")}
-        t0 = time.perf_counter()
         try:
+            unload_others(a.base, model)
+            t0 = time.perf_counter()
             chat(a.base, model, "Reply with OK.", 8)
             rec["load_s"] = round(time.perf_counter() - t0, 1)
             for name, t in TESTS.items():
