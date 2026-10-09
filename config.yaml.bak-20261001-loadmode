@@ -1,0 +1,2157 @@
+# ############################################################################## #
+# EDIT WORKFLOW -- run this after EVERY set of edits to this file, before you    #
+# consider the job finished:                                                     #
+#   1. python3 ./sync-models.py   # regenerates models.json from config.yaml and  #
+#                                 # copies the result to ~/.pi/agent/models.json  #
+#   2. commit + push              # remote: JimJafar/llama-swap-config, branch main #
+# WHY: models.json silently drifts from config.yaml if it is not regenerated, and #
+# an uncommitted/unpushed edit is a change that will be lost or made twice.       #
+# ORDER: run sync-models.py AFTER the config edits (it reads this file), never    #
+# before -- otherwise you sync the previous state.                                #
+# ############################################################################## #
+
+# LINTING: this file is EXEMPT from yamllint -- see .yamllint.yaml. It carried
+# 457 legacy >80-col lines (416 comments predating the <=80 rule, 42 command
+# lines that cannot be wrapped: docker -e CUDA_VISIBLE_DEVICES= GPU-UUID lists,
+# -m paths, bind mounts), so the rule re-fired on every edit with nothing new.
+# The <=80 convention for NEW lines still applies here; it is enforced in
+# review, not by yamllint. Re-enable by deleting the `ignore` key there.
+
+# llama-swap runs as a host binary (llama-swap-bin AUR). Most model backends run
+# as Docker containers: llama.cpp uses the mostlygeek image with its entrypoint
+# overridden to /app/llama-server, while vLLM uses the vllm image. Q3.8-FN-EXL3
+# is a host TabbyAPI process in an isolated Python venv. ${PORT} is assigned by
+# llama-swap; containers publish it, while host processes bind it directly.
+# cmdStop or default SIGTERM handling stops the backend and frees VRAM.
+#
+# Shared docker flags for llama.cpp models:
+#   --runtime nvidia --cap-add SYS_ADMIN  (matches the previously-working setup)
+#   --entrypoint /app/llama-server        (image entrypoint is llama-swap)
+#
+#   --ulimit memlock=-1:-1                REQUIRED by every model that passes --mlock
+#                                         (currently q35b / g31mtp / g26moe / ge4bmtp).
+#   WHY (2026-09-21): docker's default memlock rlimit inside a container is 8 KiB, so
+#   `--mlock` was silently locking nothing -- llama.cpp warns and carries on. The
+#   consequence was visible as 8.6 GB of ge4bmtp's weights sitting in /dev/zram0 while
+#   the model was idle: because --no-mmap had already copied the weights into anonymous
+#   memory, every idle page was compressible, so zram ate it and the first request after
+#   a pause paid a decompress. Verified: `docker run --ulimit memlock=-1:-1 ... ulimit -l`
+#   prints `unlimited` (vs `8192` by default). --cap-add IPC_LOCK is NOT needed once the
+#   rlimit is unlimited -- mlock() accepts rlimit OR capability, so this stays least-priv.
+#   KEEP --mlock AND --ulimit TOGETHER: --mlock without the rlimit is a no-op, and the
+#   rlimit without --mlock only widens a limit nothing uses.
+#
+# IMAGE POLICY (2026-09-07): do NOT pin llama.cpp / vLLM / llama-swap builds. Everything
+# tracks mainline "latest": official ggml-org llama.cpp uses the rolling server-cuda13 tag;
+# llama-swap's bundled image is its rolling :cuda tag. These tags only advance when you
+# `docker pull`, so include image pulls in the normal update step. The one deliberate
+# exception is a local fork build (local/llama-swap:...) while its feature is still unmerged;
+# revert it to mainline latest the moment the feature lands.
+#
+# Max seconds to wait for a model to become ready after launch. Raised from the 120s
+# default for the vLLM entries (e.g. qwen36-27b-nvfp4), which take ~180s to load + capture graphs.
+healthCheckTimeout: 600
+
+# Expose model `aliases` as extra entries in /v1/models (default false). Needed
+# so API-discovering clients (not just pi's models.json) can see the alias;
+# e.g. `subagent`; llama-swap still routes a request to the alias either way.
+includeAliasesInList: true
+
+# Warm the whole 'default' group on every llama-swap start/restart (fires a
+# background GET / at each model; swap:false in the group keeps them coexisting
+# instead of swapping). 27B is the slow leg (~30-60 s); healthCheckTimeout
+# covers it. Runtime eviction (e.g. a 122B/curator load) does NOT re-trigger
+# this -- members just reload on their next request.
+hooks:
+  on_startup:
+    preload:
+      # Strata FIRST (2026-09-30): the only persistent model. Its group is exclusive,
+      # so loading it after the others would evict them; loaded first, the ones
+      # below (non-exclusive gemma-resident members on the ZOTAC/NPU) load beside it.
+      - Strata-IQ3XXS
+      - whisper-npu-asr
+      # s1-mini is tiny (462 MiB) and its load is ~seconds, so preloading it at every
+      # llama-swap start keeps Baruch's first dictation warm without startup cost worth
+      # worrying about. (Baruch also warms it on its own start; this covers the case
+      # where llama-swap restarts after Baruch has already booted.)
+      - s1-mini
+
+# Qwen 3.5/3.6/3.8 jinja template fix
+#
+# The fixed template comes from here: https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates/blob/main/README.md
+#
+# All Qwen 3.5, 3.6 and 3.8 variants should have `--jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja`
+# (llama.cpp). The .jinja file must live in the MOUNTED models dir (/mnt/shared/models on the host,
+# which is bind-mounted to /models in every container) -- a host-side repo path is invisible inside
+# the container. For the vLLM entry the flag is `--chat-template <path>` instead (no --jinja).
+#
+# The Thinking Toggle
+#
+# You can control the model reasoning behavior. Insert `<|think_on|>` or `<|think_off|>` anywhere in your system or user prompt. The template intercepts the tag, removes it from the final context so the model never sees it, and flips the reasoning mode instantly.
+#
+# **Fast answer, no reasoning:**
+# ```text
+# System: You are a coding assistant. <|think_off|>
+# User: What's 2+2?
+# ```
+#
+# **Deep reasoning:**
+# ```text
+# System: You are a coding assistant. <|think_on|>
+# User: Implement a red-black tree in Rust.
+# ```
+# *(The tag syntax uses Qwen's control token delimiters to guarantee it will never collide with legitimate text or file paths, unlike earlier community templates that used `/think`)*
+#
+# Token Saving (Stripping past thoughts):
+#
+# By default, this template **preserves** all past `<think>` blocks in the chat history. This prevents the model from suffering "amnesia stalls" during complex agentic loops, and it mathematically guarantees a 100% Prefix KV Cache hit rate on local inference engines.
+#
+# If you are running constrained hardware and need to save context tokens, you can explicitly disable this feature in your engine's template kwargs to automatically strip past thoughts:
+# ```json
+# {
+#   "preserve_thinking": false
+# }
+# ```
+# *(Note: Setting this to false will reduce your KV Cache hit rate during multi-turn chats because the prompt string will dynamically mutate).*
+
+##################################################################################
+# GPU TOPOLOGY (4 GPUs, 72 GiB; updated 2026-09-24)                          #
+#   All four cards are installed and enumerate as shown. Pin every entry by UUID #
+#   so a card swap or a re-ordering can never silently move a model.             #
+#                                                                                #
+#   PCI       Card                VRAM      Role         UUID prefix   CUDA idx  #
+#   01:00.0   RTX 5060 Ti         16 GiB    compute      57bbb375      CUDA2     #
+#   02:00.0   RTX 3090            24 GiB    desktop/CPEG 93ab52e5      CUDA0     #
+#   03:00.0   RTX 5070 Ti         16 GiB    compute      d64df8cf      CUDA1     #
+#   M.2 RTX 5060 Ti ZOTAC 16 GiB RESERVED af5bd53f CUDA3                       #
+#                                                                                #
+#   The 3090 is the display card (kwin/compositor on it, ~0.6-0.7 GiB). For      #
+#   the -sm tensor TP pair put the 3090 FIRST (CUDA0/--main-gpu 0) and bias      #
+#   --tensor-split toward it so it carries most weights + the larger KV share.   #
+#   CUDA order is fastest-first; 3090 is CUDA0 and ZOTAC is last.              #
+#   Most profiles list only the three compute UUIDs above. Tabby Qwen EXL3 is  #
+#   the four-GPU exception and lists the ZOTAC last.
+#                                                                                #
+# >>> ZOTAC VOICE-RESERVED; TABBY QWEN EXCEPTION (2026-09-25) <<<
+#   s1-mini (~1.5 GiB) and chatterbox-turbo (~1.6 GiB) remain loaded here.
+#   Q3.8-FN-EXL3 uses a 7.5 GiB split alongside those services (was 10.5 GiB).
+#   Measured after the rebalance: ~6.1 GiB free, up from ~2.4 GiB.
+#   Gemma E4B (4.9 GiB weights) coexists ONLY because its context is 102400.
+#   At its former -c 262144 it needed 8.2 GiB and could not fit beside Qwen;
+#   at -c 131072 it still fails. See the gemma-4-E4B-MTP cmd.
+#   qwen-clean-2b and parakeet-asr remain unlisted, on-demand fallbacks.
+#   Do not load them while Qwen uses ZOTAC. Other profiles exclude af5bd53f.
+#   Five former ZOTAC models moved to MSI on 2026-09-12.
+#   Other DeepSeek / Flash-Next --fit and MTP entries remain 3-GPU. Tabby
+#   Qwen EXL3 is the four-GPU exception; it trades headroom for zero CPU MoE
+#   offload at the configured 256K context.
+##################################################################################
+
+# NOTE 2026-09-30: this top-level `preload:` key is NOT read by llama-swap -- the
+# reload log only ever preloads hooks.on_startup.preload (near the top). Kept for its
+# history; edit the hooks list to change what actually preloads.
+preload:
+  # Large GPU models are loaded on demand so whole-machine models such as
+  # Qwen3.8-Flash-Next can fit without startup contention.
+  #
+  # ZOTAC hosts voice services; Tabby Qwen EXL3 may use 7.5 GiB here.
+  # Gemma E4B is capped at -c 102400 so it fits beside Qwen; s1-mini and
+  # chatterbox can stay. Raising Gemma's context or Qwen's split breaks this.
+  # qwen-clean-2b and parakeet-asr are on-demand fallbacks; do not load while
+  # Qwen uses the ZOTAC. Other profiles stay pinned away from this card.
+  # A preloaded model must be in a persistent group, or it can be evicted.
+  #
+  # NOTE: `preload` only works for CHAT-shaped backends. llama-swap warms a preloaded
+  # model with a chat request, so an ASR/TTS backend 404s and llama-swap then STOPS the
+  # process it just started (observed for whisper-npu-asr and chatterbox-turbo).
+  # chatterbox-turbo is therefore warmed through its real endpoint by stt-warmup
+  # (warmup-stt.sh) instead of being listed here.
+  #
+  # 2026-09-30: STRATA IS THE ONLY PRELOADED AND THE ONLY PERSISTENT MODEL (Jim's
+  # call). It serves the `subagent` alias and the librarian curator. gemma-4-E4B-MTP,
+  # s1-mini and Q3.8-27B-IQ4XS (the old factory model) were removed from preload:
+  # Strata's group is exclusive, so it would evict them straight after they loaded,
+  # and the 27B wants the same 3090 + 5070 Ti that Strata holds.
+  - Strata-IQ3XXS
+
+models:
+  # ########### #
+  # QWEN MODELS #
+  # ########### #
+
+  Q3.6-35B-Q4:
+    # MoE + MTP (2026-06-12): ~119 -> ~168 t/s decode (+41%) via the MTP-enabled GGUF
+    # (Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf from unsloth/Qwen3.6-35B-A3B-MTP-GGUF) plus
+    # --spec-type draft-mtp. Fastest model here, ~3x the vLLM 27B; n-max 2 per Unsloth
+    # docs. (The non-MTP fallback GGUF was deleted 2026-07-21 to free disk; only the
+    # -MTP GGUF this entry runs remains.)
+    cmd: |
+      docker run --rm --name q35b --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.6-35B-A3B-UD-Q4_K_M-MTP.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
+
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      --fit on
+      --fit-ctx 128000
+      --fit-target 256
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 2048
+      -ctk q8_0
+      -ctv q8_0
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format none
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q35b
+
+    # Q4 member of the qwen35 family. Switched 2026-08-22 from Qwen3.5-9B-Q4_1.gguf
+    # to unsloth's UD-Q4_K_XL requant (~5.6 GB) -- finer per-block scaling, roughly
+    # same size. ngram-mod speculation below (NO MTP: this GGUF, like the Q4_1/Q8_0
+    # builds and every file in unsloth/Qwen3.5-9B-GGUF, ships no nextn tensors --
+    # verified 2026-08-22: 427 tensors, blk.0-31 only. --spec-type draft-mtp would
+    # abort at load; see the Q8 entry note). ZOTAC-pinned like the Q8 entry;
+    # weights ~5.6 GB + KV + dictation ~1.7 GB still fits 16 GB.
+  Q3.5-9B-Q4:
+    cmd: |
+      docker run --rm --name q9bq4 --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # known-good image build: b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
+
+      -ngl 99
+      -c 250000
+      -fa on
+      -np 2
+      --no-mmap
+      -b 2048
+      -ub 2048
+
+      # draft speculation - ngram only (NO MTP: no nextn tensors in this
+      # GGUF -- would abort at load). ngram-mod window retuned 2026-08-22
+      # from the 27B sibling's 24/24/86 after a live probe measured 13.7%
+      # draft acceptance (32/234) -- long ngrams barely match this model's
+      # output. Re-check the "draft acceptance" line in the logs; if it's
+      # still <~30%, drop speculation entirely.
+
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 12
+      --spec-ngram-mod-n-max 32
+
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 1.5
+      --repeat-penalty 1.0
+      --reasoning off
+      --reasoning-format deepseek
+      --chat-template-kwargs "{\"preserve_thinking\": false}"
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q9bq4
+
+    # CURATOR LoRA ENTRIES (added 2026-08-21): The Librarian's curator, task-specific
+    # rank/alpha-8 adapters on Qwen3.5-9B (Unsloth Studio SFT, completion-only, non-
+    # thinking data). The 100-case grooming adapter beat its 250/500-case siblings in
+    # blind review; harvesting's 100-case adapter lifted F1 78.2 -> 80.8. See
+    # "How to get big results from a tiny model" (Writing/Published/AI/...).
+    #
+    # llama.cpp loads the adapter with --lora-scaled <gguf>:1.0 on top of the SAME
+    # base as the Q3.5-9B-Q4 entry above (Qwen3.5-9B-UD-Q4_K_XL.gguf, switched
+    # from Q4_1 on 2026-08-22). (This build has no -l short flag / space
+    # scale -- plain `--lora FNAME` also works.) The r8 adapters are ~29 MB, so VRAM/
+    # coexistence math follows the plain 9B entry (ZOTAC, ~7 GB +
+    # dictation's ~1.7 GB fits the 16 GB card).
+    # The three entries (plain + these two) swap with each other on request; only
+    # one 9B can be resident at a time (same ZOTAC card).
+    #
+    # Thinking is pinned OFF ("enable_thinking": false) to match the training data --
+    # same trick as qwen-clean-2b. pi's qwen3.5 wiring (sync-models.py) can still
+    # flip it per request if you want to experiment.
+  curator-grooming:
+    unlisted: true
+    cmd: |
+      docker run --rm --name q9b-cgroom --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # known-good image build: b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
+      # this build takes --lora FNAME / --lora-scaled FNAME:SCALE (no -l, no space scale)
+      --lora-scaled /models/curator-qwen35-9b-grooming-100-r8-lora-f16.gguf:1.0
+
+      # fixed chat template
+      --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
+
+      -ngl 99
+      -c 132768
+      -fa on
+      -np 1
+      --no-mmap
+      -b 2048
+      -ub 2048
+
+      # draft speculation - ngram only (NO MTP: no nextn tensors in this
+      # GGUF -- would abort at load). ngram-mod window retuned 2026-08-22
+      # (24/24/86 measured 13.7% draft acceptance on the plain Q4 entry).
+
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 12
+      --spec-ngram-mod-n-max 32
+
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format none
+      --chat-template-kwargs "{\"enable_thinking\": false}"
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q9b-cgroom
+
+  curator-harvesting:
+    unlisted: true
+    cmd: |
+      docker run --rm --name q9b-charvest --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # known-good image build: b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
+      # this build takes --lora FNAME / --lora-scaled FNAME:SCALE (no -l, no space scale)
+      --lora-scaled /models/curator-qwen35-9b-harvesting-100-r8-lora-f16.gguf:1.0
+
+      # fixed chat template
+      --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
+
+      -ngl 99
+      -c 132768
+      -fa on
+      -np 1
+      --no-mmap
+      -b 2048
+      -ub 2048
+
+      # draft speculation - ngram only (NO MTP: no nextn tensors in this
+      # GGUF -- would abort at load). ngram-mod window retuned 2026-08-22
+      # (24/24/86 measured 13.7% draft acceptance on the plain Q4 entry).
+
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 12
+      --spec-ngram-mod-n-max 32
+
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format none
+      --chat-template-kwargs "{\"enable_thinking\": false}"
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q9b-charvest
+
+    # Qwen3.8-Flash-Next UD-IQ4_XS (added 2026-08-26): 180B total / 6B active, with
+    # 51B n-gram embeddings. The three GGUF shards live on /mnt/models (not the usual
+    # /mnt/shared/models). Uses official llama.cpp mainline (server-cuda13) with --fit to
+    # place the active MoE layers across all three GPUs; the large embedding table and
+    # context KV stay host-memory/mmap-backed, so context scales to ~196K (verified
+    # 2026-08-28). Do not preload this model alongside the resident models.
+    # Re-pinned 2026-09-08 to the current 3-GPU set (5070 Ti d64df8cf, 5060 Ti
+    # 57bbb375, 3090 93ab52e5) after the ZOTAC (af5bd53f) it used to pin returned-less;
+    # validated: loads healthy at -c 196608, ~51 GiB VRAM across the three cards.
+  Q3.8-FN-AC-IQ4_XS:
+    # 2026-09-18: unlisted at Jim's request -- the MTP variant (Q3.8-FN-AC-IQ4XS-MTP) is
+    # the one in use now. Still requestable by id; config kept for A/B reference.
+    unlisted: true
+    cmd: |
+      docker run --rm --name qwen38-flash-next --runtime nvidia --ipc=host
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
+      --fit on
+      # 2026-09-10 (MEASURED): with --fit-target the fit now uses ALL THREE GPUs --
+      # ~50.1 GiB total at -c 196608, leaving 5060 Ti 977 MiB / 3090 2334 MiB /
+      # 5070 Ti 1241 MiB free. Device order = 5070 Ti (CUDA0), 5060 Ti (CUDA1),
+      # 3090 (CUDA2). Lowering the 3090 target to 512 changed nothing (used
+      # 21737 -> 21757 MiB): --fit is LAYER-GRANULAR, so the next layer/experts do
+      # not fit and it keeps ~2.3 GiB idle on the 3090 regardless. 1024 is therefore
+      # the floor that GUARANTEES the requested >=1 GiB headroom on the 3090 (which
+      # also carries the desktop). To consume the remaining 3090 slack you would
+      # have to drop --fit and place layers by hand.
+      --fit-target 1024,1024,1024
+      --device CUDA0,CUDA1,CUDA2
+      --threads 20
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+      --flash-attn on
+      -c 196608
+      # 2026-09-15 (MEASURED): -b 2048 -ub 512 beats the previous -b 512 -ub 256 on prefill
+      # (+21% at 8k: 527->640 t/s; +22% at 32k: 483->590 t/s, TTFT 68.0->55.5 s; +20% at 98k)
+      # with no decode cost. -ub 1024/2048 improve prefill slightly but collapse tg (33/24 t/s),
+      # so -ub 512 is the ceiling. Loads healthy at -c 196608 (KV is preallocated at load).
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      -np 1
+
+      # engrams on ssd
+      --load-mode none
+
+      # draft speculation - ngram
+      # Official latest llama.cpp (server-cuda13, build >=10666) -- Qwen3.8-Flash-Next
+      # (qwen4exp) MODEL support merged in PR #27742, but the MTP draft graph (PR #27739)
+      # is NOT in the official image, so no draft-mtp here. MTP was trialled via a patched
+      # build but gave ~0 speedup (12 t/s; the 51 GiB PLE n-gram table dominates per-token
+      # cost and MTP only skips transformer layers), so it was reverted. ngram fallback kept.
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --reasoning-format deepseek
+      --reasoning on
+      --reasoning-preserve
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop qwen38-flash-next
+
+    # Explore instance for the EnGram Explorer token-continuation browser
+    # (~/llama-swap/engram-explorer, pm2 engram-explorer, http://marvin:8350). Re-created
+    # 2026-10-01 on the AtomicChat IQ4_XS GGUF (its per_layer_token_embd engram table is
+    # 320M x 160, Q5_1, 35.8 GiB) after the UD-IQ4_XS model and its explore entry were
+    # removed. Identical to Q3.8-FN-AC-IQ4_XS except reasoning OFF and temp 0, so n_probs
+    # continuations are substantive tokens, not chain-of-thought noise. The explorer
+    # reaches it through llama-swap's /upstream/<model>/ passthrough (/tokenize,
+    # /completion), so no fixed host port is needed. Not preloaded; swaps within
+    # qwen38-workload like the other Flash-Next entries.
+  Q3.8-FN-AC-IQ4_XS-explore:
+    unlisted: true
+    cmd: |
+      docker run --rm --name qwen38-flash-next-explore --runtime nvidia --ipc=host
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
+      --fit on
+      # 2026-09-10 (MEASURED): with --fit-target the fit now uses ALL THREE GPUs --
+      # ~50.1 GiB total at -c 196608, leaving 5060 Ti 977 MiB / 3090 2334 MiB /
+      # 5070 Ti 1241 MiB free. Device order = 5070 Ti (CUDA0), 5060 Ti (CUDA1),
+      # 3090 (CUDA2). Lowering the 3090 target to 512 changed nothing (used
+      # 21737 -> 21757 MiB): --fit is LAYER-GRANULAR, so the next layer/experts do
+      # not fit and it keeps ~2.3 GiB idle on the 3090 regardless. 1024 is therefore
+      # the floor that GUARANTEES the requested >=1 GiB headroom on the 3090 (which
+      # also carries the desktop). To consume the remaining 3090 slack you would
+      # have to drop --fit and place layers by hand.
+      --fit-target 1024,1024,1024
+      --device CUDA0,CUDA1,CUDA2
+      --threads 20
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+      --flash-attn on
+      -c 196608
+      # 2026-09-15 (MEASURED): -b 2048 -ub 512 beats the previous -b 512 -ub 256 on prefill
+      # (+21% at 8k: 527->640 t/s; +22% at 32k: 483->590 t/s, TTFT 68.0->55.5 s; +20% at 98k)
+      # with no decode cost. -ub 1024/2048 improve prefill slightly but collapse tg (33/24 t/s),
+      # so -ub 512 is the ceiling. Loads healthy at -c 196608 (KV is preallocated at load).
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      -np 1
+
+      # engrams on ssd
+      --load-mode none
+
+      # draft speculation - ngram
+      # Official latest llama.cpp (server-cuda13, build >=10666) -- Qwen3.8-Flash-Next
+      # (qwen4exp) MODEL support merged in PR #27742, but the MTP draft graph (PR #27739)
+      # is NOT in the official image, so no draft-mtp here. MTP was trialled via a patched
+      # build but gave ~0 speedup (12 t/s; the 51 GiB PLE n-gram table dominates per-token
+      # cost and MTP only skips transformer layers), so it was reverted. ngram fallback kept.
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --reasoning off
+      --temp 0.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop qwen38-flash-next-explore
+
+    # Qwen3.8-Flash-Next Swift-1.5 GSQ-RCO IQ3_XXS (added 2026-09-26).
+    # ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF (GSQ-RCO mixed-precision
+    # requant by ISTA DASLab of the Swift-1.5 post-train).
+    #
+    # VERIFIED in the local GGUF headers (2026-09-26, both shards COMPLETE:
+    # the expected span from the tensor table equals the actual file size,
+    # byte-exact, on both):
+    #   shard 1  37.053 GiB = engram 26.822 GiB + body 10.221 GiB (316 tensors)
+    #   shard 2  33.696 GiB = body only (906 tensors)
+    #   TOTAL    70.739 GiB = body 43.916 GiB + engram 26.822 GiB
+    # The engram is per_layer_token_embd.weight [160, 320001536] at type 20
+    # (IQ4_NL): this requant stores the 51.2B-element n-gram codebook at
+    # 4.5 bpw, ~26.8 GiB -- HALF the ~51 GB the AtomicChat IQ4_XS entry
+    # carries. That is the real win here: the whole codebook fits the 64 GB
+    # box's page cache, where the AC entry's 51 GB forces disk reads per
+    # token (its ~12 t/s). RAM is otherwise free because the body is fully
+    # VRAM-resident, so prefer -lazy-mode off (RAM) over on (SSD).
+    # Quant mix: IQ3_S 9.1, IQ4_NL 8.0, Q2_0 6.6, IQ2_S 5.0, IQ2_XS 4.5,
+    # IQ2_XXS 3.6, IQ3_XXS 3.6, Q4_K/Q5_K/Q6_K 1.6, F32/BF16 1.6 GiB.
+    # Q2_0 is ggml type 42 (mainline enum: Q1_0 41, Q2_0 42; confirmed in the
+    # local qwen4exp-mtp fork's ggml.h). The official image is newer than that
+    # fork, so it handles it -- if a load ever fails with an unknown tensor
+    # type, Q2_0 is the thing to chase.
+    #
+    # BUDGET (MEASURED free VRAM 2026-09-26; desktop already on the 3090):
+    #   5070 Ti 15897 + 5060 Ti 15898 + 3090 22572 MiB = 53.09 GiB.
+    #   With 512 MiB headroom on the two consumer cards and 1 GiB on the 3090
+    #   (= --fit-target 512,512,1024) usable = 51.09 GiB.
+    #   Body = 43.9 GiB (70.75 GiB file minus the 26.8 GiB IQ4_NL engram tensor,
+    #   which --load-mode none keeps OUT of VRAM). Plus q8_0 KV at the full
+    #   262144 native context (~3.6 GiB) plus ~1 GiB compute = ~48.5 GiB, so
+    #   ~2.6 GiB spare. Full native context, no need to trade context away.
+      # body 43.916 GiB + q8_0 KV 3.59 GiB + ~1 GiB compute = ~48.5 GiB
+      # against 51.09 GiB usable => ~2.6 GiB spare. Full native 262144.
+      # f16 KV at 262144 (~6.8 GiB) does NOT fit in that budget -- keep q8_0.
+      #
+      # LOAD-VERIFIED 2026-09-26 (build b11176, official image, --fit on):
+      # loaded in ~25 s at the full 262144 context. nvidia-smi after load:
+      # 5060 Ti 15165 / 3090 22759 / 5070 Ti 15173 MiB used = 51.85 GiB, with
+      # 777 / 1385 / 761 MiB free -- every card ABOVE its --fit-target, i.e.
+      # the body is fully resident and nothing spilled to RAM. The 26.8 GiB
+      # engram never enters VRAM in either lazy-mode. Decode 38.9 t/s, prefill
+      # 333 t/s at low reasoning effort (see the engram note for the A/B).
+    #
+    # KV IS CHEAP HERE: only 12 of 48 blocks carry KV (full_attention_interval 4
+    # -> compress_ratios 4 on blocks 3,7,...,47) at 2 KV heads x (256 key + 256
+    # value), plus a 128-dim indexer key = ~13.8k elems/token. The other 36
+    # blocks are SSM/linear with fixed-size state (~14.3 KiB/token at q8_0).
+    #
+    # WATCH ON FIRST LOAD: --fit is LAYER-GRANULAR and can strand ~2 GiB on a
+    # card; with ~2.6 GiB spare, a couple of layers' experts may spill to RAM
+    # (small decode cost, not a load failure). If a long prompt OOMs it is the
+    # prefill compute buffer, which scales with -ub and is NOT split evenly
+    # across cards -- lower -ub, not -c (see the 2x16 GB note in README).
+    #
+    # MTP: TRIED AND REJECTED (measured 2026-09-26; same file, same flags, same
+    # cards, only --spec-type differing; fork binary images/qwen4exp-mtp; all at
+    # the 7,043-token prompt):
+    #   official b11176, ngram-mod : prefill 808.0 | decode 36.85
+    #   fork,           ngram-mod : prefill 785.6 | decode 27.41
+    #   fork,           draft-mtp : prefill 549.5 | decode 33.88
+    # Draft acceptance was healthy (56-66%, mean len 2.69-2.98) and MTP did lift
+    # the FORK's own decode (+23.6%), but that still lands BELOW the official
+    # image without MTP, and it costs 32% prefill. The fork's no-MTP decode is
+    # already 25.6% under b11176, so its MTP gain only partly closes that gap.
+    # This file is also ~7 GiB heavier than the GSQ-RCO-Q2_0 base whose
+    # +50-62% MTP figures are recorded above, so those do NOT transfer here.
+    # Do not re-trial MTP on this file without a new build.
+    #
+    # n_max 2 ALSO TRIED (same sweep, same session): acceptance 66.3% vs 52.6%
+    # and decode 30.78 vs 29.32 at 7k (+5%), mean accepted len 2.29-2.36 vs
+    # 2.53-2.61. Shallower drafts are the better setting because they waste
+    # fewer tokens, but BOTH depths still sit below the official image's 33.4
+    # t/s measured in that same session, and both cost ~28% prefill
+    # (573 vs 791 t/s). If MTP is ever revisited here, use n_max 2.
+    # METHOD NOTE: run-to-run variance is ~5-10% (the official baseline moved
+    # 36.85 -> 33.4 t/s across sessions, the fork 27.4 -> 28.2). Compare only
+    # within a single sweep, never across sessions.
+    #
+    # ngram-mod vs NO SPECULATION -- measured 2026-09-26 on the official image,
+    # same file, same flags, only the speculation flags differing, 7,043-token
+    # prompt. This is the baseline the MTP block above was missing:
+    #   --spec-type none                      prefill 801.6 | decode 36.20
+    #   ngram-mod 24/24/86 (previous)         prefill 814.6 | decode 36.93
+    #   ngram-mod 24/12/32 (now used)         prefill 817.1 | decode 37.30
+    # So ngram-mod is NOT a cost here: it is ~+2% and was not slower on either
+    # prompt. What lost was MTP, never ngram. The margin sits inside the 5-10%
+    # variance above, so read the window change as aligning this entry with the
+    # other ngram entries' 2026-08-22 retune (long ngrams rarely match this
+    # model), not as a measured win.
+    #
+    # ENABLED FOR USE 2026-09-26. Previously intended as an unlisted safe A/B,
+    # but it is now published to pi on purpose. Still never preloaded: it sits
+    # in the swap group qwen38-workload, so selecting it swaps the resident 27B
+    # out and it holds the 5070 Ti + MSI 5060 Ti + 3090 only while in use
+    # (~25 s load, ~52 GiB across those three cards). Thinking levels are wired
+    # automatically (the id carries the q3.8 marker).
+  Q3.8-FN-Swift-IQ3_XXS:
+    cmd: |
+      docker run --rm --name qwen38-swift-iq3 --runtime nvidia --ipc=host
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+      # Mount the model directory ITSELF as /models, plus just the chat
+      # template as a file. That keeps every line in this entry at <=80 cols,
+      # which mounting all of /mnt/models would not: the shard filename alone
+      # is 57 chars and /models/<long dir>/<file> reaches 118.
+      -p ${PORT}:8080
+      -v /mnt/models/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS:/models:ro
+      -v /mnt/models/qwen_sharp_template_oneline.jinja:/tpl.jinja:ro
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf
+      --fit on
+      # CUDA0 = 5070 Ti, CUDA1 = 5060 Ti, CUDA2 = 3090 (the 3090 carries the
+      # desktop, so it keeps 1 GiB; the two consumer cards only need 512 MiB).
+      --fit-target 512,512,1024
+      --device CUDA0,CUDA1,CUDA2
+      --threads 20
+      # the template path is the file-mounted /tpl.jinja (see the mounts above)
+      --jinja --chat-template-file /tpl.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+      --flash-attn on
+      -c 262144
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      -np 1
+
+      # engram offload. NOTE: --load-mode is the GENERAL load mode
+      # (auto/none/mmap/mlock/dio), NOT an engram switch; the control is
+      # --lazy-mode (on = read rows from disk on demand, requires mmap; auto =
+      # same for tensors > 4 GiB; off = keep resident).
+      # MEASURED 2026-09-26, both ways, same prompt (the "KV cache" bench):
+      #   default  container RAM  5.65 GiB | prefill 333.3 | decode 38.86 t/s
+      #   -lzm off container RAM 32.78 GiB | prefill 366.4 | decode 42.66 t/s
+      # So holding the 26.8 GiB table in RAM buys only ~+10%, and costs 27 GiB
+      # on a 64 GB box shared with the voice stack/factory (available RAM fell
+      # 40 -> 16 GiB). DEFAULT KEPT: the page cache already serves most reads,
+      # and 27 GiB of anonymous memory is unreclaimable under pressure. Add
+      #   --lazy-mode off
+      # back only for a dedicated-throughput run with the box otherwise idle.
+      --load-mode none
+      # window retuned to match the other ngram entries (see the A/B above)
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 12
+      --spec-ngram-mod-n-max 32
+
+      --reasoning-format deepseek
+      --reasoning on
+      --reasoning-preserve
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop qwen38-swift-iq3
+
+    # Qwen3.8 EXL3 / TabbyAPI four-GPU trial; Q8 cache, 256K context.
+    # CPU MoE offload disabled; shared ZOTAC split capped at 7.5 GiB.
+    # Short zero-offload request passed with 256K configured; boundary untested.
+    # On-demand profile; TabbyAPI's default config remains unchanged.
+    # Tabby auth is disabled per request; llama-swap has no per-model auth gate.
+    # Endpoint is loopback-only and browser CORS is disabled.
+  Q3.8-FN-EXL3:
+    checkEndpoint: /health
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: Qwen3.8-Flash-Next-exl3
+    env:
+      - PYTHONUNBUFFERED=1
+      - TABBY_LOG_LEVEL=WARNING
+    # Launcher sets a private umask and runs TabbyAPI in its app directory.
+    cmd: /home/jim/llama-swap/tabby-qwen.sh ${PORT} --max-seq-len 262144
+
+  Strata-IQ3XXS:
+    # 2026-10-01: NOW THE BASE MODEL. Qwen3.8-Flash-Next GSQ-RCO IQ3_XXS (ISTA-DASLab),
+    # engine 0.1.31, launcher run-strata-qwen.sh, engine config strata-iq3_xxs.json
+    # (its header lists the hand edits on top of setup). Renamed from
+    # Strata-Swift-IQ3XXS: Swift 1.5 (UkisAI's fine-tune) was dropped and its files
+    # deleted because it fell into thinking loops of 240K tokens (see RUNAWAY GUARD).
+    # Same card order, context, KV streaming, mmap and defaults as before; the one
+    # change is that mmap now reads the experts from the GGUF in place (0.1.31), so
+    # there is no experts.bin. EVERYTHING MEASURED BELOW WAS ON SWIFT -- same quant and
+    # architecture, so the shapes should carry over, but re-measure before relying on it.
+    #
+    # (history) Swift 1.5 at IQ3_XXS was chosen over IQ3_S for this box:
+    # arena_gb 42.9 vs 50.3, so it wants ~7 GiB less system RAM. Swift's own claim:
+    # "thinks much shorter (-63% thinking tokens, 1.8x sooner answers)".
+    #
+    # MEASURED 2026-09-30, 3 cards, 64K, int8 KV with KV streaming on:
+    #   decode 76.1 t/s | prompt 98.7 t/s | expert cache hit 92.1%
+    #   vs IQ3_S's 56.7 / 87.2 / 84.0% -- faster as well as smaller, because
+    #   each expert is smaller, so the same VRAM caches a bigger share.
+    #   RAM during the run: available 6.9 GiB, swap 8.7 GiB -- the guard did NOT
+    #   fire, where on IQ3_S it did.
+    #
+    # RE-MEASURED 2026-09-30 after upgrading the engine 0.1.27 -> 0.1.30 AND moving to
+    # 2 cards, "gpu": [2, 1] in strata-swift-iq3_xxs.json (5070 Ti first, 3090 second).
+    # Same prompts (unique nonce, no prefix reuse), 400 generated tokens, prefill t/s:
+    #   prompt tokens     950   3.5K   13.5K   25K
+    #   0.1.27 [0,1,2]    254    490     774   737   decode ~70
+    #   0.1.30 [0,1,2]    484    685     834   872   decode ~73
+    #   0.1.30 [1,2]      557   1036    1679  1865   decode ~85
+    #   0.1.30 [2,1]      574   1123    1830  2251   decode ~81   <- chosen (prefill)
+    #   0.1.30 [1,2,0]    426    533     536   508   (5060 Ti gets 1 layer; prompt loans shrink to 0.45 GiB)
+    # Why: 0.1.30 lets each split stage borrow its own cache slots for the prompt
+    # buffers (Strata PR #216) -> "prompt chunk auto: 8192 tokens" instead of 2048. The x4
+    # 5060 Ti as a third stage costs a hand-off per window and drags the chunk down.
+    # [2,1] beats [1,2] because the LAST stage carries the head + draft layer: the 3090
+    # absorbs that and still caches 16.9 GiB of experts (vs 9.6 GiB with the 5070 Ti last).
+    # GPU 0 (5060 Ti) is now free while Strata runs.
+    # Still open: only 7 GiB of the arena is pinned (8 GiB multi-GPU cap, Strata #253;
+    # fixed in 0.1.31 via STRATA_ARENA_PIN_GIB) and the service's LimitMEMLOCK is 8 MiB.
+    # Re-running setup.sh rewrites the json -- pass --gpus 2,1 to keep this order.
+    # The json also has "fit_max_tokens": true (2026-09-30): pi sends maxTokens (95% of
+    # the context) on every request, and Strata otherwise 400s when prompt + max_tokens
+    # > context; with it, Strata shortens the output cap to the room left. Check it
+    # survives any setup.sh re-run.
+    #
+    # CONTEXT 262144 (the trained max), set 2026-09-30 by editing --max-context in the
+    # json: setup.py would cap it at 128K (its rule: arena + KV + 24 GB headroom > 62 GB).
+    # Measured on [2,1]: 117K-token prompt 2587 t/s (45 s), decode 72.9;
+    #                    235K-token prompt 2435 t/s (96 s), decode 78.2, answer correct.
+    # Cost: KV RAM 0.77 -> 1.55 GiB; VRAM unchanged (--kv-resident keeps 32K cells on card).
+    # RAM at the 235K peak, with gemma + s1-mini also loaded: 1-2 GiB available and
+    # 9 GiB of Strata swapped to zram. Fine as the only model; risky alongside others.
+    # CONCURRENCY: Strata serves ONE request at a time (FIFO; by design, Strata #97/#249),
+    # and the multi-conversation cache is rejected with --layer-split.
+    #
+    # RAM MODE: --mmap-experts (added 2026-09-30). The pack now has experts.bin (40 GiB,
+    # built with iq_pack.py --experts-bin); the experts are served from the OS page
+    # cache, so they are FILE-backed and reclaimable instead of 43 GB of anonymous RAM
+    # that zram swaps. Measured on [2,1] at 262K: RssAnon 1.9-2.4 GiB, RssFile ~40 GiB,
+    # MemAvailable 41-43 GiB (was 1-5 GiB). Prefill 378/907/1442/1996 t/s at
+    # 1K/3.5K/13.5K/25K and 2304 at 117K (-10..-35% vs the arena; worst on short
+    # prompts), decode 86-88 (no worse). Under real memory pressure the evicted experts
+    # come back from the NVMe instead of zram -- not yet measured.
+    # --resident-experts (0.1.30's low-RAM resident mode) is REJECTED with a layer split:
+    # "--resident-cpu-experts does not support layer splits". Back to the arena: delete
+    # "--mmap-experts" from the json.
+    #
+    # 4 CARDS TRIED 2026-09-30 ([2,1,0,3], mmap, Gemma + chatterbox still on GPU 3):
+    # prefill 323/733/964/1104, decode 42-58 -- clearly WORSE than [2,1]. Auto split
+    # K=17,30,39 predicted 29.0 ms per decode window vs 24.7 ms for [2,1]. Why "all
+    # experts in VRAM" does not pay: [2,1] already caches ~98.8% of the ROUTED mass
+    # (decode hit rate ~99%); the ~7,000 experts left in RAM are rarely used. Two
+    # 5060 Tis (0.77 ms/layer, x4 links) and three hand-offs per window cost more than
+    # that last 1% saves. Gemma/chatterbox are persistent + preloaded/warmed on GPU 3
+    # and reload within seconds of an unload.
+    #
+    # LAYOUT: the base (ISTA-DASLab) release keeps the PLE tensor (per_layer_token_embd)
+    # alone in shard 2, so --native is shard 1 and --ple-gguf shard 2. (Swift had it in
+    # shard 1.) setup.py finds it by scanning for the tensor; do not "fix" that by hand.
+    #
+    # Its engine config also turns KV STREAMING on (--kv-resident): the KV cache
+    # lives in RAM (~3.6 GB at 262K) so more expert slots fit in VRAM.
+    checkEndpoint: /health
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: qwen3.8-flash-next-iq3_xxs
+    cmd: /home/jim/Strata/run-strata-qwen.sh ${PORT}
+    aliases: [subagent]
+    # RUNAWAY GUARD (2026-10-01). A request with NO max_tokens gets the whole context as
+    # its output budget (~240K tokens), and Swift can fall into a thinking loop: the
+    # librarian curator (ssd-nodes, model `subagent`, no max_tokens, 5-min client
+    # timeout, intake every 5 min) ran three requests to 237-247K tokens, ~33 min each.
+    # Strata only notices a vanished client when it writes to it, so a non-streaming
+    # request keeps generating after the client gives up, and the next sweep queues
+    # behind it. `max_tokens?` only fills a MISSING value (the "?"), so pi and other
+    # clients that send their own max_tokens are unaffected. 16384 at ~110 t/s is
+    # ~2.5 min: done inside the curator's 5-min timeout.
+    filters:
+      setParams:
+        max_tokens?: 16384
+
+    # MTP entry -- REBUILT + MEASURED 2026-09-18. Runs danielhanchen/llama.cpp branch
+    # qwen4exp/mtp @ 53b1389d0 (its 2026-09-18 merge of upstream master) with a real MTP
+    # draft, as a HOST binary.  Upstream has the qwen4exp MODEL (PR #27742, merged) but NOT
+    # the MTP draft graph (PR #27739, closed unmerged), so this fork is the only path.
+    #
+    # WHY THE OLD "MTP gives ~0 speedup" NOTE IS WRONG: the previous version ran an image
+    # built 2026-09-03, which predates five MTP commits on the branch -- notably
+    # d1a92352c "speculative: only gemma4-assistant shares the target KV cache" (09-04) and
+    # the 09-18 merge fixing the hyper-connection shapes. Left flat, nextn.hc_head_norm
+    # aborts at load with GGML_ASSERT(ggml_can_repeat(b, a)) in build_hc_mix. Rebuilt and
+    # re-measured, MTP works and is a large win.
+    #
+    # MEASURED 2026-09-18 with MTP ACTIVE on this exact cmd:
+    #   5,420 tok -> prefill 274.2 t/s, ttft 19.8 s, decode 55.17 t/s
+    #  21,774 tok -> prefill 347.6 t/s, ttft 62.6 s, decode 53.70 t/s
+    #   draft acceptance 74-84% (best 142/170 = 83.5%; mean accepted len 3.49 at n_max 3)
+    # vs the main entry's no-MTP figures on this same file (prefill 305/361/372, decode
+    # 49.49/35.30/27.10): MTP is +11% decode at 5.4k and +98% at 21.8k, and more importantly
+    # keeps decode FLAT with context (55.17 -> 53.70) where no-MTP collapses (49.49 ->
+    # 27.10). It costs ~10% prefill at 5.4k, ~4% at 21.8k. The same flat-decode shape
+    # reproduced independently on ik_llama.cpp, so it is a property of MTP on this model
+    # rather than a placement artefact. (ik_llama.cpp was evaluated as an alternative engine
+    # and its checkout DELETED 2026-09-18 -- Jim is standardising on llama.cpp, so do not go
+    # looking for it. The finding above still stands; only the engine is gone.)
+    #
+    # HOST BINARY, NOT A CONTAINER (deliberate, two reasons):
+    #  1. The branch needs nvcc (CUDA 13.4 at /opt/cuda). Its build CANNOT be dropped into
+    #     ghcr.io/ggml-org/llama.cpp:server-cuda13 -- that image is Ubuntu 24.04 / glibc
+    #     2.39, this host is Arch / glibc 2.43, so the binaries die with
+    #     "libm.so.6: version `GLIBC_2.43' not found". A container build would need a
+    #     distro-matched nvidia/cuda devel image (~7 GB pull).
+    #  2. No image means nothing to lose (cf. the factory-* images vanishing 2026-09-04).
+    # LD_LIBRARY_PATH is REQUIRED: the build baked RUNPATH=/home/jim/code/.../build/bin.
+    # RUNPATH (unlike RPATH) loses to LD_LIBRARY_PATH, so the durable copy below wins and
+    # the source tree is not needed at runtime.
+    #
+    # GOTCHA (cost one failed attempt): llama-swap does NOT run `cmd` through a shell -- it
+    # execs the first whitespace-separated token as the program. So `VAR=x binary ...` and a
+    # leading `exec` both fail with
+    #   exec: "CUDA_DEVICE_ORDER=PCI_BUS_ID": executable file not found in $PATH
+    # /usr/bin/env is therefore the executable, with the VAR=value pairs as its arguments.
+    # This also works if llama-swap ever switches to a shell. `unlisted` still hides it from
+    # /v1/models while remaining requestable by id (verified).
+    #
+    # DURABILITY: binary + 22 shared libs in  images/qwen4exp-mtp/app/  (git-ignored, 122 MB)
+    #   rebuild the optional container : images/qwen4exp-mtp/build-image.sh
+    #   recompile from source @SHA     : images/qwen4exp-mtp/rebuild-from-scratch.sh
+    #   provenance (commit/toolchain)  : images/qwen4exp-mtp/VERSION
+  Q3.8-FN-AC-IQ4XS-MTP:
+    # 2026-09-18: `unlisted: true` removed at Jim's request -- validated, so it is now
+    # visible in the model list instead of being API-only.
+    cmd: |
+      /usr/bin/env \
+      CUDA_DEVICE_ORDER=PCI_BUS_ID \
+      CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 \
+      LD_LIBRARY_PATH=/home/jim/llama-swap/images/qwen4exp-mtp/app \
+      /home/jim/llama-swap/images/qwen4exp-mtp/app/llama-server \
+      -m /mnt/models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf \
+      -md /mnt/models/mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf \
+      --spec-type draft-mtp,ngram-mod \
+      --spec-draft-n-max 3 \
+      --spec-ngram-mod-n-match 24 \
+      --spec-ngram-mod-n-min 24 \
+      --spec-ngram-mod-n-max 86 \
+      --fit on \
+      --device CUDA0,CUDA1,CUDA2 \
+      --threads 20 \
+      --jinja --chat-template-file /mnt/models/qwen_sharp_template_oneline.jinja \
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}" \
+      --flash-attn on \
+      -c 196608 \
+      -b 2048 \
+      -ub 512 \
+      -ctk q8_0 \
+      -ctv q8_0 \
+      -np 1 \
+      --load-mode none \
+      --reasoning-format deepseek \
+      --reasoning on \
+      --reasoning-preserve \
+      --temp 1.0 \
+      --top-p 0.95 \
+      --top-k 20 \
+      --min-p 0.0 \
+      --presence-penalty 0.0 \
+      --repeat-penalty 1.0 \
+      --timeout 900 \
+      --host 127.0.0.1 \
+      --port ${PORT}
+
+    # ISTA-DASLab GSQ-RCO Q2_0 (added 2026-09-16). Verified by parsing the downloaded
+    # GGUF headers AND ISA's per-tensor allocation file: transformer 37.62 GB @ 2.394 bpw
+    # (type Q2_0 = 121.06B params); shard 2 is ONE 28.80 GB tensor
+    # (per_layer_token_embd @ IQ4_NL, 51.20B params). ZERO IQ1_M. Codebook share 0.65%
+    # (only IQ4_XS 0.82B) vs the AtomicChat entry's ~96%.
+    # WHY THIS VARIANT OVER IQ3_XXS: two independent speed axes, and Ivan measured the
+    # bigger one. (1) IQ1_M has NO MMQ kernel in server-cuda13 -> the AtomicChat entry
+    # runs 60.40B params (48% of its transformer) through the dequant+f16-sgemm fallback
+    # on prefill. Q2_0 has zero IQ1_M. (2) codebook/i-quant share: ISTA reports 367 vs 108
+    # t/s prefill between Q2_0 and IQ2_XS, BOTH of which have MMQ -- so the codebook axis
+    # dominates. IQ3_XXS is IQ1_M-free but still 77% codebook; it does NOT get this win.
+    # CONTEXT: 37.62 GB resident vs AtomicChat's 46.53 frees ~8.9 GB. At this model's
+    # 51 KiB/token q8_0 KV (48 layers, 2 KV heads, key/value length 256) that is the
+    # difference between the 196,608 VRAM ceiling and the native 262,144 cap
+    # (KV 13.69 GB, ~5.5 GB expected spare). NOTE: shard 2 is a single >4 GiB tensor, so
+    # --lazy-mode auto already applies; it is set explicitly to match ISA's guidance.
+    # First load from /mnt/shared/models is mmap-backed, so expect a slow cold start.
+  Q3.8-FN-GSQ-RCO-Q2_0:
+    # 2026-09-18: unlisted at Jim's request -- the MTP variant (Q3.8-FN-GSQ-RCO-Q2_0-MTP)
+    # is the one in use now. Still requestable by id; config kept for A/B reference.
+    unlisted: true
+    cmd: |
+      docker run --rm --name qwen38-flash-q20 --runtime nvidia --ipc=host
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/Qwen3.8-Flash-Next-GSQ-RCO-Q2/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf
+      --fit on
+      --fit-target 1024,1024,1024
+      --device CUDA0,CUDA1,CUDA2
+      --threads 20
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+      --flash-attn on
+      -c 262144
+      # -b 2048 -ub 512 is the measured-best prefill pair from the AtomicChat entry
+      # (2026-09-15); -ub 1024/2048 collapse tg. Kept identical for a fair A/B.
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      -np 1
+
+      # shard 2 (the 28.80 GB PLE table) stays on disk; rows are read on demand.
+      --load-mode mmap
+      --lazy-mode on
+
+      --spec-type ngram-mod
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --reasoning-format deepseek
+      --reasoning on
+      --reasoning-preserve
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop qwen38-flash-q20
+
+  # MTP variant of the GSQ entry above (added 2026-09-18). Identical to it EXCEPT that
+  # --spec-type ngram-mod is replaced by draft-mtp using the same shared MTP draft the
+  # AtomicChat MTP entry uses, and it runs the qwen4exp/mtp host binary rather than the
+  # stock image. See Q3.8-FN-AC-IQ4XS-MTP for provenance, build and durability notes.
+  #
+  # MEASURED 2026-09-18 as a CLEAN A/B -- same placement, same flags, only --spec-type
+  # differs (this is the control that was missing from the earlier ik_llama numbers; that
+  # engine's checkout was DELETED 2026-09-18 -- everything below is llama.cpp only):
+  #   MTP ON :  5,420 tok -> prefill 331.4, ttft 16.4 s, decode 78.10
+  #            21,774 tok -> prefill 425.0, ttft 51.2 s, decode 78.35
+  #   MTP OFF:  5,420 tok -> prefill 333.1, ttft 16.3 s, decode 52.11
+  #            21,774 tok -> prefill 430.3, ttft 50.6 s, decode 48.48
+  #   => decode +50% at 5.4k and +62% at 21.8k; prefill cost 0.5-1.2% (within noise).
+  #   Draft acceptance 75.9% (88/115, 88/116), mean accepted length 3.26 at n_max 3.
+  #
+  # GSQ IS THE BETTER MTP BASE THAN ATOMICCHAT, on both axes:
+  #   GSQ + MTP : prefill 331/425, decode 78.10/78.35
+  #   AC  + MTP : prefill 274/348, decode 55.17/53.70
+  # Worth noting GSQ also barely suffers the long-context decode collapse WITHOUT MTP
+  # (52.11 -> 48.48) where AtomicChat collapses hard (49.49 -> 27.10).
+  Q3.8-FN-GSQ-RCO-Q2_0-MTP:
+    unlisted: true # model file deleted to make room for the swift-1.5 variant
+    cmd: |
+      /usr/bin/env \
+      CUDA_DEVICE_ORDER=PCI_BUS_ID \
+      CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 \
+      LD_LIBRARY_PATH=/home/jim/llama-swap/images/qwen4exp-mtp/app \
+      /home/jim/llama-swap/images/qwen4exp-mtp/app/llama-server \
+      -m /mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-Q2/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf \
+      -md /mnt/models/mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf \
+      --spec-type draft-mtp,ngram-mod \
+      --spec-draft-n-max 3 \
+      --spec-ngram-mod-n-match 24 \
+      --spec-ngram-mod-n-min 24 \
+      --spec-ngram-mod-n-max 86 \
+      --fit on \
+      --fit-target 1024,1024,1024 \
+      --device CUDA0,CUDA1,CUDA2 \
+      --threads 20 \
+      --jinja --chat-template-file /mnt/shared/models/qwen_sharp_template_oneline.jinja \
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}" \
+      --flash-attn on \
+      -c 262144 \
+      -b 2048 \
+      -ub 512 \
+      -ctk q8_0 \
+      -ctv q8_0 \
+      -np 1 \
+      --load-mode mmap \
+      --lazy-mode on \
+      --reasoning-format deepseek \
+      --reasoning on \
+      --reasoning-preserve \
+      --temp 1.0 \
+      --top-p 0.95 \
+      --top-k 20 \
+      --min-p 0.0 \
+      --presence-penalty 0.0 \
+      --repeat-penalty 1.0 \
+      --timeout 900 \
+      --host 127.0.0.1 \
+      --port ${PORT}
+
+
+    # *** 2026-09-10 CURRENT STATE = the 180K QUICK-TEST PROFILE (authoritative; the
+    # historical notes below are STALE). Runs on the 3090 (93ab52e5, 24 GiB, CUDA0 /
+    # --main-gpu) + 5070 Ti (d64df8cf, 16 GiB); -c 180000, --tensor-split 1.00,0.80.
+    # MEASURED at 180K/0.80: 3090 ~19.9/24.6 GiB used (~4.1 GiB free), 5070 Ti ~14.3/16.3
+    # GiB used (~1.55 GiB free). MTP + ngram unchanged. Weights 22019 MiB + mmproj 889 +
+    # MTP draft 1307.
+    # CORRECTION 2026-09-21: "MTP draft 1307" is the draft FILE size, NOT its VRAM cost.
+    # Measured on the Hemmingway entry by loading with/without -md and diffing nvidia-smi,
+    # the same qwen3.8-mtp-Q4_0.gguf costs 804 MiB of VRAM total (~402 MiB per card), because
+    # the draft borrows the target's embeddings and lm head so part of the file never loads.
+    # BUDGET 804 MiB, NOT 1307. Also note qwen35 files carry their own nextn head, so this
+    # -md is optional: dropping it frees that 804 MiB for a within-noise decode change, and
+    # removes the need for this entry's draft bind mount.
+    #
+    # TO RESTORE THE FULL-CONTEXT (262144) PROFILE: copy
+    #   config.yaml.snap-q6-262K-20260910-115747
+    # back over config.yaml -- that snapshot holds -c 262144 with --tensor-split 1.00,0.65.
+    # At 262144 the 5070 Ti OOMs at 1.00,0.80, so 0.65 (weighted to the 3090) is required;
+    # it measured 3090 655 MiB / 5070 Ti 969 MiB free. The Meta() split is a SHARP STEP, so
+    # ~655 MiB is the most 3090 headroom available at 262K (cut -ub 512->256 for more).
+    #
+    # Qwen3.8-27B Q6_K (added 2026-08-14): dense 27B, UD Q6_K quant (23.09 GB; dynamic
+    # layout mixes Q8_0/Q5_K/Q4_K blocks + a few IQ1_S). Hybrid arch (Gated DeltaNet +
+    # full attention every 4th layer) so KV cache is cheap.
+    #
+    # TENSOR-SPLIT (switched 2026-08-19): now -sm tensor, mirroring the validated
+    # Q3.8-27B-IQ4XS entry. The old "plain Q6_K can't -sm tensor
+    # (GGML_ASSERT SPLIT_AXIS_UNKNOWN)" caveat was a BUILD artifact of the b9692-era
+    # image, not a property of this file -- the current mostlygeek image (>= b10362,
+    # same as the IQ4_XS TP entry) tensor-splits these quants fine. Same 2-card UUID
+    # pinning (MSI 5060 Ti = device0, 5070 Ti = device1), NCCL 2.30.4 LD_PRELOAD,
+    # --fit off (fit is unimplemented for tensor mode), -ts 1.00,1.00 (the
+    # sharp-threshold balance point from the IQ4_XS probe).
+    #
+    # MEMORY WARNING (NOT YET PROBED): weights are 23.09 GB vs the validated IQ4_XS's
+    # 16.86 GB, ~4.9 GB/card more at 1.00,1.00 -- the 262144 ctx that loaded for IQ4_XS
+    # (MSI 1545 / 5070 464 MiB free) will almost certainly NOT fit here. Probe like the
+    # IQ4_XS context probe: step -c down (196608 -> 131072 -> 98304) and/or -ub 512 ->
+    # 256 until graph_reserve stops OOMing on device0. The 5070 (device1) carries ~600
+    # MiB of desktop and will be the wall. Realistic ceiling looks like ~64-128K.
+    #
+    # KV: q8_0 kept (validated with -sm tensor at b10362). If a future image rejects
+    # quantized KV + tensor mode (current master does), switch -ctk/-ctv to f16.
+    #
+    # MTP: VERIFIED 2026-08-16 (GGUF header parse) -- this file DOES ship the 4
+    # nextn tensors (blk.64.nextn.{eh_proj,enorm,hnorm,shared_head_norm}). The
+    # --spec-type draft-mtp flags below work on this file.
+    #
+    # Chat template: uses the shared Qwen 3.5/3.6 fixed template (Qwen3.8 inherits
+    # the same template structure). If reasoning tags don't parse correctly, check
+    # froggeric/Qwen-Fixed-Chat-Templates for a Qwen3.8 update.
+  Q3.8-27B-Q6KM:
+    cmd: |
+      docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
+      --ipc=host
+      # GPU re-pin (2026-09-09): moved OFF the 5060 Ti (57bbb375, 16 GiB) onto the
+      # 3090 (93ab52e5, 24 GiB). CUDA0 = 3090 = --main-gpu 0, CUDA1 = 5070 Ti
+      # (d64df8cf). 3090-first ordering matches the validated IQ4_XS-MTP-TP pairing.
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
+      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.8-27B-UD-Q6_K_M.gguf
+      --mmproj /models/qwen3.8-mmproj-BF16.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+
+      -ngl 99
+      --flash-attn on
+      -sm tensor
+      --fit off
+
+      -b 2048
+      # 2026-09-10: RESTORED to 180000 for the operator's quick test (this is the profile
+      # that ran "very nearly as fast as Q4_XS" at split 1.00,0.80). MEASURED then: 3090
+      # ~19.9/24.6 GiB used (~4.1 GiB free), 5070 Ti ~14.3/16.3 GiB used (~1.55 GiB free).
+      # The full-context profile is -c 262144 / split 1.00,0.65, preserved as
+      # config.yaml.snap-q6-262K-20260910-115747 (at 262144 the 5070 Ti OOMs at 0.80).
+      -c 240000
+      -ctk q8_0
+      -ctv q8_0
+      --main-gpu 0
+      # 1.00,0.80 (restored 2026-09-10): the 180K balance point -- an even-ish split keeps
+      # both ranks doing ~equal TP work (fastest decode), which is what made this profile
+      # "very nearly as fast as Q4_XS". NOTE 0.80 CANNOT hold 262144 -- the 5070 Ti OOMs at
+      # that context; the 262K profile uses 1.00,0.65 (config.yaml.snap-q6-262K-20260910-115747).
+      # Meta() split is a sharp step, not a dial.
+      --tensor-split 1.00,0.80
+      -np 1
+      -ub 512
+
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+
+      --reasoning-format deepseek
+      --reasoning-budget -1
+      --reasoning on
+      --reasoning-preserve
+
+      # draft speculation - MTP + ngram
+      # sibling (depth sweep: n_max 3; draft KV f16 default; ngram 24/48/64).
+      --spec-type draft-mtp,ngram-mod
+      -md /models/qwen3.8-mtp-Q4_0.gguf
+      --spec-draft-n-max 3
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q38-27b
+    # --- The Native Formatting Flags ---
+    #filters:
+    # - type: "format_reasoning"
+    #  options:
+    #   strip_tags: true          # Removes the physical <think> text from Codex's view
+    #  map_to_openai: true       # Moves reasoning text to response.output_item.reasoning_content
+    # --- Force Qwen's internal engine to preserve thinking contexts ---
+    #chat_template_kwargs:
+    # preserve_thinking: true       # Prevents KV cache wipe between thoughts and final answer
+
+  # --- Altworld/Hemmingway-1 (added 2026-09-21) ---
+  # A prose-writing fine-tune of Qwen3.8-27B, Apache-2.0. bartowski imatrix Q4_K_M
+  # (17.44 GB / 16.24 GiB), quantized with llama.cpp b10964. Built on the same base as
+  # Q3.8-27B-* so this entry is a copy of Q3.8-27B-Q6KM with the deltas called out below.
+  #
+  # VERIFIED in the local GGUF header (2026-09-21): arch qwen35, 65 blocks, head_count 24,
+  # head_count_kv 4, key/value_length 256, full_attention_interval 4, context 262144,
+  # size_label 27B -- and the SAME 4 head-carrying MTP tensors the Q6KM entry documents:
+  # blk.64.nextn.{eh_proj,enorm,hnorm,shared_head_norm} with nextn_predict_layers=1. So MTP
+  # needs no separate export; the quants ship it, per the bartowski card.
+  #
+  # MTP MEASURED 2026-09-21 (same model, same prompt, two ways):
+  #   --spec-type draft-mtp alone : 68.88 t/s, draft 240/131 (54.6%) -- uses the file's OWN
+  #                                 nextn head; the log confirms "creating MTP draft context
+  #                                 against the target model".
+  #   + -md qwen3.8-mtp-Q4_0.gguf : 71.98 t/s, draft 234/133 (56.8%)
+  # Both work, but -md IS DELIBERATELY OMITTED here. Two reasons:
+  #  1. The gain above is ONE ~211-token run -- inside noise, and under 5%.
+  #  2. It costs real VRAM, which this entry cannot spare. MEASURED 2026-09-21 by loading
+  #     these same flags twice with only -md differing and diffing nvidia-smi after a full
+  #     load (so the draft's KV + compute buffers are included):
+  #         no -md  : 3090 15201 MiB + 5070 Ti 15167 MiB = 30368 MiB
+  #         with -md : 3090 15603 MiB + 5070 Ti 15569 MiB = 31172 MiB
+  #         => -md costs 804 MiB TOTAL, ~402 MiB PER CARD, split evenly.
+  #     The draft FILE is 1307 MiB, but only ~804 MiB reaches VRAM because the draft BORROWS
+  #     the target's embeddings and lm head (branch commit "llama: let an MTP draft borrow the
+  #     target's embeddings and lm head"), so that portion is never loaded.
+  #     At --fit off / --tensor-split 1.00,1.00 the 5070 Ti is the wall, so 402 MiB there is
+  #     the difference between ~537 MiB and ~939 MiB free -- a materially safer margin.
+  # Head-carrying MTP costs ZERO extra VRAM: the 4 nextn tensors are already inside the model
+  # file, so this needs no second file and no second bind mount.
+  # To re-enable the separate draft, restore the -md line AND `-v /mnt/shared/models:/shared`.
+  #
+  # DELIBERATE OMISSIONS vs the 27B entries:
+  #   --mmproj          : the model card lists "Input support: text". The Qwen3.8 vision
+  #                       projector is not part of this fine-tune.
+  #   -c 240000 (Q6KM)  : that cap exists to fit a 23 GB Q6_K. This file is 16.24 GiB, so the
+  #                       full native 262144 is attempted here.
+  #   --reasoning-budget -1 : Q6KM sets it (unlimited). Left OFF because a measured run on this
+  #                       family with unlimited budget spent the whole allowance inside
+  #                       reasoning and emitted no content tokens. Remove if you want it.
+  #
+  # Same 2-card pair (3090 + 5070 Ti) and the same no-P2P workaround as Q3.8-27B-Q6KM, so it
+  # MUST stay in the `qwen38-workload` group or it will not swap.
+  Hemmingway:
+    cmd: |
+      docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      --ipc=host
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
+      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/Altworld_Hemmingway-1-Q4_K_M.gguf
+
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+
+      -ngl 99
+      --flash-attn on
+      -sm tensor
+      --fit off
+      --main-gpu 0
+      -b 2048
+      -c 262144
+      -ctk q8_0
+      -ctv q8_0
+      -ub 512
+      -np 1
+      # 1.00,1.00 is the balance point for this card pair -- the Q3.8-27B-IQ4XS notes record
+      # that the split is a SHARP threshold (0.99,1.01 overloads the desktop-carrying 5070).
+      # If graph_reserve OOMs on device1, step -c down (196608 -> 131072) OR weight away from
+      # the 5070 with 1.00,0.80 as Q6KM does.
+      --tensor-split 1.00,1.00
+
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 3
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+
+      --reasoning-format deepseek
+      --reasoning on
+      --reasoning-preserve
+
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop hemmingway
+
+    # --- Swift-1.5-Qwen3.8-27B Q6_K_S (added 2026-09-26) ---
+  # Swift-1.5 = community post-train on the Qwen3.8-27B base (the GGUF's
+  # general.name is "Miroslav 1.0"). Same 2-card pair as Q6KM/Hemmingway:
+  # 3090 + 5070 Ti, no-P2P workaround, tensor mode, full native context.
+  #
+  # VERIFIED in the local GGUF header (2026-09-26; 866 tensors; file COMPLETE --
+  # expected size from the tensor table == actual size, byte-exact): arch
+  # qwen35, 65 blocks (64 + 1 MTP block), head_count 24, head_count_kv 4,
+  # key/value_length 256, full_attention_interval 4, context 262144,
+  # nextn_predict_layers 1, and the SAME 4 head-carrying MTP tensors as
+  # Q6KM/Hemmingway: blk.64.nextn.{eh_proj,enorm,hnorm,shared_head_norm}.
+  # So MTP uses the file's OWN head: no -md, no second file, no extra VRAM
+  # (the Hemmingway measurement put the separate draft at +804 MiB for <5%).
+  # This is structurally the same model as Hemmingway, so that entry is the
+  # right template -- and its arch/flags are already proven on this card pair.
+  #
+  # QUANT: 21.28 GiB of tensor data = Q6_K 19.07 + Q8_0 1.88 + Q4_0 0.22 +
+  # F32 0.10 GiB (24.97B params at Q6_K). K-quants only, so -sm tensor is safe;
+  # the GGML_ASSERT SPLIT_AXIS_UNKNOWN trap is for plain I-quants.
+  #
+  # BUDGET at -c 262144, q8_0 KV. KV is cheap on this hybrid: 16 of 64 layers
+  # carry it (full_attention_interval 4 -> blocks 3,7,...,63) at 4 KV heads x
+  # 256 (k) + 4 x 256 (v) = 2048 elems/layer/token => ~34 KiB/token at q8_0
+  # => ~8.5 GiB for 262144. f16 KV needs 16 GiB and does NOT fit this pair, so
+  # q8_0 here is a requirement, not a preference.
+  #
+  # Anchored on the MEASURED Hemmingway load (same arch, same cards, same
+  # flags, 16.24 GiB): 3090 15201 + 5070 Ti 15167 = 30368 MiB, i.e. ~13.7 GiB
+  # of non-weight overhead (KV + graph reserve + SSM state). Our weights are
+  # 5.04 GiB larger, so Hemmingway's 1.00,1.00 would OOM device1 -- this file
+  # needs the Q6KM-262K weighting.
+  #
+  # SPLIT: 1.00,0.65 -- the value the Q6KM 262K snapshot used for a 22.01 GiB
+  # file at this same context on this same pair. Solving the per-card budget
+  # (3090 <= 21548, 5070 Ti <= 15385 MiB after 1024/512 headroom) gives a
+  # feasible 3090 weight share of 0.58-0.62; 1.00,0.65 = 0.606 and predicts
+  # ~550 MiB free on the 3090 / ~850 MiB on the 5070 Ti. The split is a SHARP
+  # threshold (see the IQ4XS notes), so if graph_reserve OOMs on device1 step
+  # to 1.00,0.60 -- and only then start lowering -c.
+  #
+  # MUST stay in `qwen38-workload` or it will not swap with the other entries
+  # that use these two cards. CAUTION: the persistent `factory-resident`
+  # Q3.8-27B-IQ4XS also owns the 3090 + 5070 Ti; if it is loaded, unload it
+  # first (switch-profile.sh) -- this entry cannot evict a persistent group.
+  Swift-1.5-27B-Q6KS:
+    cmd: |
+      docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      --ipc=host
+      # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
+      # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
+      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # official mainline image: MTP is in mainline since 2026-09-07 and is
+      # ~18% faster there than on the old mostlygeek bundled build.
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/Swift-1.5-Qwen3.8-27B-Q6_K_S.gguf
+
+      # fixed chat template (shared with the other Qwen3.8 entries; the file
+      # already sits in /mnt/shared/models, so no second mount). A/B: this GGUF
+      # ships its OWN template which also handles reasoning_effort and
+      # preserve_thinking, so if reasoning tags misparse on this fine-tune,
+      # drop both template flags and let the embedded one run.
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+
+      -ngl 99
+      --flash-attn on
+      -sm tensor
+      --fit off
+      --main-gpu 0
+      -b 2048
+      -c 262144
+      -ctk q8_0
+      -ctv q8_0
+      -ub 512
+      -np 1
+      # weighted to the 3090 -- see SPLIT above. 1.00,1.00 (Hemmingway) OOMs
+      # device1 at this file size.
+      --tensor-split 1.00,0.65
+
+      # draft speculation - MTP (the file's OWN nextn head) + ngram
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 3
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+
+      --reasoning-format deepseek
+      --reasoning on
+      --reasoning-preserve
+
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop swift27b
+
+    # --- TENSOR-PARALLEL IQ4_XS variant of Qwen3.8-27B (added 2026-08-19) ---
+    # This llama.cpp entry owns the primary name. The vLLM NVFP4 variant (which briefly
+    # took the name on 2026-08-31) OOMed at load on the desktop-limited 5070 -- the
+    # MTP-drafter NVFP4 scale-processing peak (~14.4 GiB) is context-independent, so
+    # max-model-len could not fix it -- and that entry has since been REMOVED from this
+    # config entirely. This is therefore the only 27B IQ4_XS entry: 2-card -sm tensor,
+    # IQ4_XS, -c 262144 native.
+    # RENAMED 2026-09-17: config ids were shortened; this entry is now `Q3.8-27B-IQ4XS`.
+    # Clone of Qwen3.8-27B-Q5-MTP-TP with the lighter IQ4_XS quant for MORE
+    # CONTEXT. MODEL: unsloth/Qwen3.8-27B-GGUF -> Qwen3.8-27B-IQ4_XS.gguf
+    # (15.7 GiB, 288 IQ4_XS + Q5_K/Q4_K outlier tensors, nextn MTP head VERIFIED
+    # in the GGUF header: blk.64.nextn.{eh_proj Q8_0, enorm/hnorm/shared_head_norm
+    # F32}). Native context 262144. NOTE: plain I-quants historically abort -sm
+    # tensor with GGML_ASSERT SPLIT_AXIS_UNKNOWN (see Q5 entry notes); this file
+    # is NOT a UD requant -- if the load aborts, drop -sm tensor or requant UD.
+    #
+    # CONTEXT PROBE: -c 262144 (native). Weights 18.8 -> 15.7 GiB frees ~1.5
+    # GB/card vs Q5 at 175K, which had MSI at 96.6% / 5070 at 89.8% -- 262K
+    # should fit; if the load OOMs at graph_reserve, step -c down (196608 ->
+    # 175000) and note the ceiling here.
+    #
+    # 2026-08-19 UPDATE (v2): desktop compositor switched Vulkan -> OpenGL,
+    # freeing ~2 GB on the 5070 Ti (device1: now 81% vs MSI device0 92%). The
+    # MSI was the wall at the old split, and the freed 5070 headroom is only
+    # usable by REBALANCING the tensor split. IMPORTANT: with the Meta()
+    # multi-device backend in build 10362 the split ratio is EXTREMELY
+    # sensitive and NOT linear:
+    #    1.01,1   -> MSI-heavy  (MSI 14988 / 5070 11746 @229K, MSI at wall)
+    #    0.99,1.01-> 5070 OVERLOADED (fails to load, cudaMalloc OOM on dev1)
+    #    0.95,1.05-> 5070 OVERLOADED (same failure)
+    #    1.00,1.00-> balanced (MSI 13944 / 5070 14383 server @245K)
+    # So the balance point is 1.00,1.00 -- the split is a sharp threshold.
+    # With it, -c 262144 (NATIVE MAX) loads: MSI 1545 MiB free, 5070 464 MiB
+    # total free (~1064 server-side; the 5070 carries ~600 MiB of desktop
+    # Xorg/compositor). See inline probe notes.
+  Q3.8-27B-IQ4XS:
+    cmd: |
+      docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
+      --ipc=host
+      # GPU re-pin (2026-09-08): the 5070 Ti (d64df8cf, 16 GiB @ 03:00.0) is back in
+      # the box, so this pair moves OFF the 5060 Ti (57bbb375, 16 GiB @ 01:00.0) onto
+      # the 5070 Ti. Machine now has three cards: 3090 (93ab52e5, 24 GiB, display @
+      # 02:00.0) + 5060 Ti (57bbb375 @ 01:00.0) + 5070 Ti (d64df8cf @ 03:00.0); this
+      # model runs on the 3090 + 5070 Ti. Both candidate secondary cards are 16 GiB,
+      # so the split balance with the 3090 carries over unchanged. CUDA0 = 3090
+      # (--main-gpu 0), CUDA1 = 5070 Ti. tensor-split is weighted toward the 3090 so
+      # it holds most of the weights AND its (larger) share of the unified KV pool;
+      # -c is at the 262144 native ceiling to spend the 3090's spare VRAM on KV.
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
+      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # 2026-09-07: MTP is now in mainline; moved off the mostlygeek bundled image (where MTP
+      # was first available) onto the official ggml-org main image. Per repo policy we do NOT
+      # pin builds - this tracks the latest mainline CUDA13 tag (docker pull to advance).
+      # Verified on the 3090+5060Ti at 262K under production settings: MTP decode ~67->~80 t/s
+      # (novel prose) / ~82->~97 t/s (code), ~+18% vs the old bundled image.
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/Qwen3.8-27B-UD-IQ4_XS.gguf
+      --mmproj /models/qwen3.8-mmproj-BF16.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+
+      -ngl 99
+      --flash-attn on
+      -sm tensor
+      --fit off
+
+      # draft speculation - MTP + ngram
+      --spec-type draft-mtp,ngram-mod
+      -md /models/qwen3.8-mtp-Q4_0.gguf
+      --spec-draft-n-max 3
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 48
+      --spec-ngram-mod-n-max 64
+
+      # --no-host: with -sm tensor, llama.cpp materialises the whole model in a
+      # private anon host buffer -- SPLIT_MODE_TENSOR must divide every tensor
+      # across the two ranks, so it cannot stream from the mmap'd GGUF. With
+      # -ngl 99 it all sits in VRAM anyway and that host copy is never read
+      # again. MEASURED 2026-09-30 without this flag: 14.38 GiB unnamed anon,
+      # 100% swapped out (0.009 GiB resident) -> ~8 GiB of zram RAM for nothing.
+      --no-host
+      -b 2048
+      # 2-slot unified shared KV pool: two slots share one pool on the fast TP pair;
+      # idle slots cost ~0. -c is the TOTAL pool (KV allocated up front, split across
+      # the two TP ranks). Now at an EVEN split both ranks hold ~equal weights AND ~equal
+      # KV. NOTE: the Meta() split ratio is a SHARP threshold -- the 5070 Ti has only
+      # 16 GiB vs the 3090's 24 GiB, so if CUDA1 (5070 Ti) OOMs at load at this split,
+      # pull the ratio back toward the 3090 (e.g. 1.00,0.70); if the 3090 (CUDA0) shows
+      # large idle headroom after load, it can take even more weights/KV.
+      -c 393216
+      -ctk q8_0
+      -ctv q8_0
+      # 2026-09-16: -c raised 262144 -> 393216 (384K shared pool) with the split pulled to
+      # 1.00,0.70 so the 3090's spare VRAM can hold KV. MEASURED ceiling on this pair:
+      # 393216 LOADS; 458752 OOMs in graph_reserve ("failed allocating 896.00 MiB on
+      # device 1" = the 5070 Ti); 524288 OOMs on device 0 (2640.28 MiB) = the 3090.
+      # NOTE the OOM is the COMPUTE buffer in ggml_backend_sched_reserve, not the KV cache,
+      # and it moves between cards with size -- so both are near their limit and this is
+      # NOT the fill point. Validate any raise with a real long prefill, per the llama-cpp
+      # skill ("the idle VRAM-fill point is not a safe -c").
+      # --- CONCURRENCY EXPERIMENT (2026-09-16): -np 1 -> -np 4 ---
+      # -c stays the TOTAL shared pool, so the VRAM budget is UNCHANGED from the -np 1
+      # profile (KV is still 262144 tokens x 34 KiB/token ~= 8.5 GiB; 16 of the 64
+      # layers carry KV because the other 48 are Gated DeltaNet with fixed state).
+      # --kv-unified MUST be explicit: its documented default is "enabled if number of
+      # slots is auto", and -np 4 is explicit, so without this flag -c would be SPLIT
+      # four ways (4 x 65536) instead of being one shared pool.
+      # --kv-unified-per-slot 131072 caps each sequence so two long requests can coexist
+      # (2 x 131072 = the whole pool) while 4 short ones still fit.
+      -np 4
+      --kv-unified
+      --kv-unified-per-slot 262144
+      # --- PREFIX REUSE (2026-09-16) ---
+      # The subagent pattern is N agents sharing one long system prompt, so the shared
+      # prefix should be prefilled ONCE. Neither flag does this by default:
+      #   --cache-reuse defaults to 0 = OFF (it is what lets a new request reuse a
+      #     prefix from the slot cache via KV shifting);
+      #   -sps defaults to 0.10, which only decides which SLOT a request is routed to.
+      # Raised -sps so a similar prompt is routed to the slot already holding its prefix.
+      --cache-reuse 256
+      -sps 0.5
+      --main-gpu 0
+      # Even split (2026-09-08): balanced so neither card is the serial bottleneck -- at
+      # 1.00,0.50 the 3090 did ~2/3 of the transformer work and capped decode throughput
+      # (moving to the 5070 Ti at the old ratio gave no speedup). Both ranks now do ~equal
+      # work. WATCH: the 5070 Ti is only 16 GiB vs the 3090's 24 GiB, so an even split puts
+      # ~half the weights AND ~half the unified KV pool on the 5070; if it OOMs at load at
+      # -c 262144, pull the ratio back toward the 3090 (e.g. 1.00,0.70) to trade load for fit.
+      --tensor-split 1.00,0.70
+      # -np 2
+      -ub 512
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+
+      --reasoning-format deepseek
+      --reasoning-budget -1
+      --reasoning on
+      --reasoning-preserve
+
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q38iq4xsmtptp
+    # NAMING (2026-08-31 / 09-01): this entry briefly carried the vLLM variant's name;
+    # that swap was reverted because the vLLM entry OOMs at load on the 5070, so this
+    # llama.cpp entry is the working primary.
+
+    # DFlash2 A/B profile (2026-09-01): clone of the MTP llama.cpp profile above.
+    # Uses the supplied Qwen3.8-specific DFlash2 draft (Q4_K_M) with the upstream
+    # DFlash2 implementation (PR #27342). Keep the same target, TP placement,
+    # context, sampling, and ngram-mod settings as its MTP sibling; only the draft
+    # mechanism/model and draft width differ. Start at n_max 4: the PR validation
+    # found it best at 32K context versus width 7. The mostlygeek image installed on
+    # the mostlygeek bundled image on this host predates DFlash2; use the official mainline
+    # server-cuda13 image (DFlash2 is now in main release), not a stale bundle.
+    #
+    # DFlash2 cannot currently run with `-sm tensor`: upstream issue #27819 exactly
+    # reproduces GGML_ASSERT(src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0) on startup.
+    # Layer split is the required workaround; leave the MTP sibling tensor-parallel
+    # so it remains the performance comparison point.
+  Q3.8-27B-IQ4XS-DF2:
+    cmd: |
+      docker run --rm --name q38iq4xsdflash2tp --runtime nvidia --cap-add SYS_ADMIN
+      --ipc=host
+      # Same 2-card UUID pinning as the MTP sibling (MSI 5060 Ti first = device0).
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
+      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/Qwen3.8-27B-UD-IQ4_XS.gguf
+      -md /models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf
+      --mmproj /models/qwen3.8-mmproj-BF16.gguf
+
+      # fixed chat template
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+
+      -ngl 99
+      --flash-attn on
+      -sm layer
+      --fit off
+
+      # DFlash2 + ngram-mod: DFlash2 is selected from the draft GGUF metadata.
+      --spec-type draft-dflash,ngram-mod
+      --spec-draft-n-max 4
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 48
+      --spec-ngram-mod-n-max 64
+
+      -b 2048
+      -c 262144
+      -ctk q8_0
+      -ctv q8_0
+      --main-gpu 0
+      --tensor-split 1.00,1.00
+      -np 1
+      # DFlash2's extra draft-context prefill graph needs ~600 MiB on CUDA1.
+      # At -ub 512 it OOMs; halve the physical batch to keep the same 262K context.
+      -ub 256
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+
+      --reasoning-format deepseek
+      --reasoning-budget -1
+      --reasoning on
+      --reasoning-preserve
+
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q38iq4xsdflash2tp
+
+    # #################### #
+    # MUSE GLIMMER MODELS #
+    # #################### #
+
+    # Muse Glimmer 30B, dynamic k-quant (~19.7 GB), plus optional DFlash drafter
+    # (~1.6 GB) and vision projector (~1.4 GB). The model card calls the speculative
+    # companion DFlash (not DSpark); both companions can run together.
+    #
+    # RUNTIME: Muse Glimmer requires llama.cpp b10353+. Pin official CUDA 13 b10775,
+    # rather than mostlygeek:cuda (which may lag the required architecture support).
+    #
+    # GPU PLACEMENT: UUID pinning exposes only the two CPU-PEG Gen5 x8 cards, in
+    # 5070 Ti / MSI 5060 Ti order. The ZOTAC 5060 Ti on the x4 M.2 adapter is excluded.
+    # Equal layer split was measured with the most demanding DFlash + vision profile
+    # at ~13.5/11.3 GiB used, leaving ~2.4/4.6 GiB free including the desktop load.
+    #
+    # CONTEXT: uses one full native 131072-token slot. llama-server
+    # divides -c across -np, hence -np 1; raising -np without scaling -c would silently
+    # reduce per-request context. The plain and DFlash profiles deliberately differ
+    # only by the drafter flags, making their throughput directly comparable.
+    #
+    # The embedded chat template requires --jinja. Sampling is the model-card recipe.
+    # Reasoning is always enabled by the template; callers can set reasoning_strength
+    # (low/medium/high/xhigh) through chat_template_kwargs per request.
+    # IMPORTANT: -md only loads the draft weights in b10362; it does not enable them.
+    # Keep --spec-type draft-dflash. Depth 3 is the measured optimum for this drafter.
+  muse-glimmer-30B-dflash-vision:
+    cmd: |
+      docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/models:/models
+      --entrypoint /app/llama-server
+      ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
+      -md /models/muse-glimmer/dflash-kquant.gguf
+      -ngld 99
+      --spec-type draft-dflash
+      --spec-draft-n-max 3
+      --mmproj /models/muse-glimmer/mmproj-kquant.gguf
+      --jinja
+      -ngl 99
+      --tensor-split 1,1
+      --main-gpu 0
+      -c 131072
+      -np 1
+      -fa on
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop muse-glimmer-dflash-vision
+
+    # ############ #
+    # GEMMA MODELS #
+    # ############ #
+
+    # NB: no `-sm tensor` gemma entry -- gemma TP+MTP crashes (GGML_ASSERT, tensor-split
+    # can't allocate the MTP graph on gemma's shared-KV arch) and TP-no-MTP (35.8 t/s) loses
+    # to layer-split+MTP below (64.3 t/s). Use gemma-4-31B-Q4-MTP; don't re-add a TP variant.
+    # gemma-4-31B-Q4-QAT + MTP assistant (added 2026-06-09). Measured ~30 -> ~50 tok/s
+    # decode (~1.68x), ~61-63% draft acceptance.
+    #
+    # known-good image build: b9692 (the gemma-4 MTP assistant needs >= b9570).
+    #
+    # MTP wiring: -md <assistant> + --spec-type draft-mtp; the assistant has
+    # nextn_predict_layers=4 so --spec-draft-n-max 4. -c trimmed to 65536 and
+    # --tensor-split eased to 1.3,1 to leave the 5070 Ti room for the draft alongside
+    # the main model. If the 5070 OOMs, lower -c further or pin the draft to the 5060
+    # with `-devd CUDA1`.
+  gemma-4-31B-Q4-MTP:
+    cmd: |
+      docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/gemma-4/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+      -md /models/gemma-4/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
+
+      # Google's updated canonical Gemma-4 chat template (from google/gemma-4-31B-it,
+      # published 2026-07-09: tool-calling / turn-closure / thinking-ordering fixes).
+      # Needs --jinja for its macros; preserve_thinking below is still supported by it.
+      --jinja --chat-template-file /models/gemma-4/gemma-4-chat_template.jinja
+
+      --spec-type draft-mtp
+      --spec-draft-n-max 4
+      -ngl 99
+      -ngld 99
+      -c 75536
+      --tensor-split 1.3,1
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 256
+      -ctk q8_0
+      -ctv q8_0
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --reasoning-budget -1
+      --chat-template-kwargs "{\"preserve_thinking\": true}"
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g31mtp
+
+    # MoE + MTP (2026-06-12): ~140 -> ~184 t/s decode (+30%) — the fastest model here.
+    # gemma-4-26B-A4B MoE (qat UD-Q4_K_XL) + its separate MTP draft, both from
+    # unsloth/gemma-4-26B-A4B-it-qat-GGUF. ggml-org image (gemma MTP needs the newer
+    # build). NO --swa-full -- gemma's iSWA would OOM with it (dual KV cache). The dense
+    # gemma-4-31B-Q4-MTP above stays for higher coding quality; this is the speed pick.
+    #
+    # PLACEMENT (ZOTAC-only, single-GPU): pinned by UUID to the ZOTAC 5060 Ti (af5bd53f).
+    # NO tensor-split / no --fit. --n-cpu-moe keeps as many MoE expert layers in the ZOTAC's
+    # VRAM as fit beside the resident dictation (qwen-clean-2b, ~1.7 GB); the rest offload to
+    # RAM (64 GB host, evictable). 16 = safe "max-on-GPU w/o evicting dictation" estimate --
+    # lower toward 14-15 for more on GPU if stable; raise to 18-20 (or -ub 512->256) if it
+    # OOMs or pushes dictation.
+  gemma-4-26B-MoE-MTP:
+    cmd: |
+      docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/gemma-4/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      -md /models/gemma-4/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
+
+      # Google's updated canonical Gemma-4 chat template (from google/gemma-4-26B-A4B-it;
+      # byte-identical to the 31B one -- Google ships one shared template for gemma-4).
+      # Needs --jinja for its macros.
+      --jinja --chat-template-file /models/gemma-4/gemma-4-chat_template.jinja
+
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -ngl 99
+      --n-cpu-moe 16
+      -ngld 99
+      -c 256000
+      -np 1
+      -fa on
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --timeout 900
+      --no-context-shift
+      --ctx-checkpoints 128
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g26moe
+
+  gemma-4-E4B-MTP:
+    cmd: |
+      docker run --rm --name ge4bmtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/gemma-4/gemma-4-E4B-it-UD-Q4_K_XL.gguf
+      -md /models/gemma-4/mtp-gemma-4-E4B-it-BF16.gguf
+
+      # Gemma-4's canonical chat template.
+      --jinja --chat-template-file /models/gemma-4/gemma-4-chat_template.jinja
+
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -ngl 99
+      -ngld 99
+      # 102400 (100K), not the model's native 131072: this is what lets Gemma
+      # sit beside the Tabby Qwen EXL3 split on the ZOTAC. Gemma VRAM is linear
+      # in context (3453 MiB + 0.018074*tokens, measured); 100K needs ~5304 MiB
+      # of the ~5625 MiB left by Qwen. 131072 does NOT fit (-198 MiB).
+      -c 102400
+      -np 1
+      -fa auto
+      --no-mmap
+      --mlock
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop ge4bmtp
+
+    # ################ #
+    # EMBEDDING MODELS #
+    # ################ #
+
+  bge-m3:
+    unlisted: true
+    cmd: |
+      docker run --rm --name bge --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/bge-m3-FP16.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 8192
+      --batch-size 8192
+      --rope-scaling yarn
+      --rope-freq-scale 0.75
+      -ngl 99
+      --embeddings
+      --no-mmap
+    cmdStop: docker stop bge
+
+    # Qwen3-Embedding-4B (added 2026-07-04): upgrade over bge-m3 for CODE retrieval.
+    # Qwen3-Embedding is explicitly trained for code + 100 languages, tops MTEB, and is
+    # vLLM-native (same ecosystem as the LLMs). 4B = quality/VRAM sweet spot on a 16GB
+    # card (~8GB BF16, loads on one GPU, no TP). Use for indexing a codebase for RAG.
+    # bge-m3 kept above for general multilingual dense+sparse; this one for code search.
+    #
+    # HARD-WON SETUP NOTES (2026-07-04):
+    #  - `--runner pooling` is the embedding flag in vLLM 0.22 (the old `--task embed`
+    #    is gone). It auto-configures LAST-token pooling for Qwen3-Embedding.
+    #  - `--enforce-eager`: skip torch.compile/cudagraph capture. Right call for a
+    #    swap-in embedder (fast start > peak throughput; a single forward pass barely
+    #    benefits from cudagraphs). Without it, first start compiles for many minutes.
+    #  - LOCAL PATH + HF_HUB_OFFLINE=1: point at the pre-downloaded dir, NOT the HF id.
+    #    With the HF id, vLLM makes unauthenticated HF Hub calls at load that get
+    #    rate-limited and HANG forever (model loads to VRAM then sits at 0% util). The
+    #    model was snapshot_download'd to /mnt/shared/models/Qwen3-Embedding-4B.
+    #  - Pinned to one card (device 0). Embedding needs no TP; llama-swap serves one
+    #    model at a time so it has the GPU to itself. Query the OpenAI /v1/embeddings
+    #    endpoint with model=qwen3-embedding-4b. NB Qwen3-Embedding wants an instruction
+    #    prefix on QUERIES (not documents) for best retrieval -- that's a client concern.
+  qwen3-embedding-4b:
+    unlisted: true
+    cmd: |
+      docker run --rm --name qwen3emb --runtime nvidia --ipc=host
+      -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1
+      -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=0
+      -e VLLM_NO_USAGE_STATS=1
+      -p ${PORT}:8000 -v /mnt/shared/models:/models
+      vllm/vllm-openai:latest
+      --model /models/Qwen3-Embedding-4B
+      --runner pooling
+      --enforce-eager
+      --served-model-name qwen3-embedding-4b
+      --max-model-len 8192
+      --gpu-memory-utilization 0.60
+      --host 0.0.0.0
+      --port 8000
+    cmdStop: docker stop qwen3emb
+
+    # ############### #
+    # DICTATION       #
+    # ############### #
+    # Speech-to-text dictation pipeline (added 2026-07-26; ASR moved to the NPU 2026-08-04).
+    # Capture (ASR on the NPU) + cleanup (LLM on the ZOTAC) kept RESIDENT TOGETHER via the
+    # `dictation` group (swap:false; defined at the bottom of this file) so a capture ->
+    # cleanup round trip never unloads/reloads between steps.
+    #
+    # ASR now runs ENTIRELY on the Core Ultra 7 265KF's NPU (13 TOPS) via OpenVINO GenAI's
+    # static WhisperPipeline -- NO GPU, so the ASR leg works even while 3-GPU --fit models
+    # hold GPU 0. Cleanup (qwen-clean-2b) is the only dictation member left on the ZOTAC.
+    #
+    # FLOW: POST /v1/audio/transcriptions (model=whisper-npu-asr) -> transcript
+    #    -> POST /v1/chat/completions   (model=qwen-clean-2b) -> clean text.
+    # llama-swap routes each request by its `model` field; the group keeps both loaded.
+    #
+    # --- ASR: distil-whisper/distil-medium.en (int8) on the Intel NPU --------------------
+    # Added 2026-08-04 (replaces parakeet-asr as the primary dictation ASR). ~1.5s per clip
+    # (fixed 30s-window encoder floor; still faster than real-time), WER closest to Parakeet
+    # of the NPU options (~2% vs ~1.4% on LibriSpeech test-clean). Server: npu/asr_server.py
+    # (FastAPI, OpenAI /v1/audio/transcriptions) over ov_genai.WhisperPipeline(device="NPU",
+    # static). Export recipe + decoder patcher + full benchmark matrix: npu/README.md.
+    # LD_LIBRARY_PATH is REQUIRED -- the rootless NPU Level Zero driver lives in the venv's
+    # openvino/libs dir (the loader does not self-locate).
+  whisper-npu-asr:
+    checkEndpoint: /health
+    env:
+      - LD_LIBRARY_PATH=/home/jim/npu-env/lib/python3.13/site-packages/openvino/libs
+      # Runs on the NPU. Pinned to NO GPU so it can never claim ZOTAC VRAM.
+      - CUDA_VISIBLE_DEVICES=
+    cmd: |
+      # SIGTERM on unload is clean (uvicorn shuts down); no cmdStop needed.
+      /home/jim/npu-env/bin/python /home/jim/llama-swap/npu/asr_server.py --port ${PORT}
+      --model-dir /mnt/shared/models/distil-medium.en-npu
+
+      # --- ASR FALLBACK: NVIDIA Parakeet TDT 0.6B (ONNX) via achetronic/parakeet ------------
+      # Kept OUT of the dictation group since 2026-08-04: it needs the ZOTAC (GPU 0), which
+      # defeats the NPU ASR's GPU-freedom. Load on demand (model=parakeet-asr) if the NPU
+      # server is down or its quality gap matters. OpenAI-compatible, English, lowest WER of
+      # all ASR options. The :latest-cuda image SHIPS the model built in (fp32 ~2.5 GB); pass
+      # `language=en` per request. Server listens on :5092.
+  parakeet-asr:
+    checkEndpoint: none
+    unlisted: true
+    cmd: |
+      docker run --rm --name parakeet --runtime nvidia
+      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -p ${PORT}:5092
+      ghcr.io/achetronic/parakeet:latest-cuda
+    cmdStop: docker stop parakeet
+
+    # (gemma-clean-e4b / gemma-clean-e2b removed 2026-07-26: superseded by qwen-clean-2b,
+    #  which matches their quality ~40x faster. GGUFs deleted from /mnt/shared/models.)
+
+    # --- CLEANUP C: Qwen3.5-2B instruct, thinking OFF -- fast cleanup (added 2026-07-26) --
+    # ~134ms/cleanup at ~90 tok/s; matches gemma-clean-e4b quality on the four dictation
+    # behaviours but ~40x faster. enable_thinking:false is ESSENTIAL -- with thinking on, the
+    # answer goes into reasoning_content and `content` returns empty. Used by baruch-server
+    # (BARUCH_CLEANUP_MODEL). See baruch docs/eval-cleanup.md.
+  qwen-clean-2b:
+    # UNLISTED + NOT WARMED (2026-09-12): kept as a fallback / A-B entry only. s1-mini
+    # replaced it as baruch-server's cleanup model, and the ZOTAC now belongs to the
+    # resident voice stack, so this must not hold VRAM at boot. Loads on demand.
+    unlisted: true
+    cmd: |
+      docker run --rm --name qclean-2b --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      # known-good image build: b9692
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/Qwen3.5-2B-UD-Q4_K_XL.gguf
+      --jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja
+      --chat-template-kwargs "{\"enable_thinking\": false}"
+      -ngl 99
+      -c 16384
+      -fa on
+      -np 1
+      --temp 0.3
+      --top-p 0.95
+      --top-k 64
+      --min-p 0.0
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop qclean-2b
+
+    # --- CLEANUP (current): S1-mini text normalizer (added 2026-09-05) ------------------
+    # S1-mini by Superwhisper (superwhisper/s1-mini, v1): a 0.6B (596M unique params)
+    # text normalizer for ASR output, fine-tuned from Qwen3-0.6B. 94.8% token accuracy
+    # on a 7.5k-case English held-out set; English only. GGUF = the Q4_K_M build
+    # (462 MiB). Now baruch-server's cleanup model (replaces gemma-4-E4B-MTP; the
+    # qwen-clean-2b entry above stays for fallback/A-B).
+    #
+    # STRICT INPUT CONTRACT (from the model card -- deviating can produce garbled or
+    # blank output; nearly every integration bug traces to one of these two things):
+    #  - System prompt must be EXACTLY the card's (baruch_server/prompts.py ships it).
+    #  - User message = one control line + newline + the raw transcript:
+    #      [Styling: casual|semi-casual|semi-formal|formal] [Structure: prose|lists] [Context: general|email]
+    #  - enable_thinking MUST be false in the template. S1 was trained with thinking
+    #    OFF; leaving it on emits an empty think block and NO usable output -- the #1
+    #    blank-result bug. Do NOT substitute --reasoning-budget 0 (suppresses the think
+    #    block a different way and degrades output).
+    #  - Decode greedily: --temp 0 (normalization is deterministic; sampling adds variance).
+    #  - Keep single passes under ~1000 tokens; chunk longer transcripts (client's job).
+    #  - Output is plain text, may be EMPTY for filler-only input -- callers must treat
+    #    "" as a valid result. Output length ~= input length.
+    #
+    # PLACEMENT (ZOTAC, single-GPU): UUID-pinned like the other dictation models.
+    # 462 MiB of weights -- trivially fits beside gemma-4-E4B-MTP in the persistent
+    # gemma-resident group (swap:false keeps them resident together; exclusive:false
+    # keeps them coexisting with the qwen38-workload 27B/Flash-Next entries: the TP
+    # 27B entries never touch the ZOTAC, and Flash-Next's --fit simply finds ~0.5 GB
+    # less headroom on this card). License: Apache-2.0 + naming clause (keep the name
+    # "S1-mini" by "Superwhisper" wherever it's used).
+  s1-mini:
+    cmd: |
+      docker run --rm --name s1mini --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      --entrypoint /app/llama-server ghcr.io/mostlygeek/llama-swap:cuda
+      -m /models/s1-mini-q4_k_m.gguf
+      # S1 contract: built-in Qwen3 template via --jinja with thinking OFF
+      # (the exact recipe from the model card's llama.cpp section).
+      --jinja
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      -ngl 99
+      # Dictation-length input; ~1k tokens is the model's sweet spot, 8K leaves
+      # headroom for long clips while KV stays well under 1 GB.
+      -c 8192
+      -fa on
+      -np 1
+      --no-mmap
+      --temp 0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop s1mini
+
+    # --- TTS: chatterbox-turbo, permanently resident on the ZOTAC (added 2026-09-12) ---
+    # ResembleAI Chatterbox-Turbo distilled to GGUF by cstr and served by CrispASR
+    # (C++/ggml; NO Python or PyTorch at runtime). This is NOT a llama.cpp model, so
+    # it follows the whisper-npu-asr host-process pattern (host binary + env +
+    # checkEndpoint) rather than the docker-model pattern.
+    #
+    # Model: cstr/chatterbox-turbo-GGUF -- a two-GGUF pipeline (T3 AR text -> speech
+    # tokens, then S3Gen meanflow CFM -> 24 kHz via HiFTGenerator). `-m auto` resolves
+    # BOTH files from that repo through CrispASR's registry into ~/.cache/crispasr/
+    # (t3-q8_0 + s3gen-q8_0, ~1.1 GiB, the recommended deployment quants). The preset
+    # voice is baked into the T3 GGUF as conds.* tensors, so no reference WAV is used.
+    #
+    # Build: CrispASR v0.8.32 release tarball crispasr-linux-x86_64-cuda13, matching the
+    # host's CUDA 13.3. The binary warns 'compiled 13.0, runtime 13.3' and then works.
+    # v0.8.1+ is REQUIRED: earlier builds lack the 19 emotion/style control tokens in
+    # the tokenizer and load inconsistently.
+    #
+    # MEASURED 2026-09-12: healthy ~10 s after start; ~1.27 GiB VRAM on the ZOTAC
+    # (card total 11.0 of 16 GiB with gemma + s1-mini already resident). POST
+    # /v1/audio/speech with NO `voice` field -> 200 and 4.72 s of 24 kHz audio.
+    # Do NOT pass a `voice` field unless --voice-dir holds that profile: it is read as
+    # a WAV path and fails with 500 'synthesis failed (backend returned empty audio)'.
+    #
+    # Emotion/style tags go inline in `input`, e.g. "[laugh] Thank you!": [laugh]
+    # [chuckle] [sigh] [gasp] [cough] [groan] [sniff] [shush] [clear throat]
+    # [whispering] [angry] [happy] [crying] [fear] [surprised] [sarcastic] [dramatic]
+    # [narration] [advertisement].
+    #
+    # Voice cloning needs a BAKED voice GGUF (chatterbox has no WAV cloning path) plus
+    # a consent attestation, and the baker is a Python step. Not set up here.
+    #
+    # EU AI Act: CrispASR warns the preset voice's provenance is unrecorded and so adds
+    # no spoken AI disclosure. --speaker-identity real_person makes it prepend one;
+    # --speaker-identity synthetic silences the warning but asserts something NOT
+    # verified. Neither is set -- decide deliberately before adding one.
+  chatterbox-turbo:
+    checkEndpoint: /health
+    env:
+      - LD_LIBRARY_PATH=/home/jim/crispasr/crispasr-linux-x86_64-cuda13
+      # ZOTAC only -- this entry must never see another card.
+      - CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+    cmd: |
+      # SIGTERM on unload is clean (server shuts down); no cmdStop needed.
+      /home/jim/crispasr/crispasr-linux-x86_64-cuda13/crispasr
+      --server
+      --backend chatterbox-turbo
+      -m auto
+      --voice-dir /home/jim/crispasr/voices
+      --port ${PORT}
+    # No cmdStop: llama-swap SIGTERMs the process directly.
+
+    # ############################################################################## #
+    # GROUPS                                                                          #
+    #   `dictation`: keep ASR (NPU) + cleanup LLM (ZOTAC) resident together.         #
+    #     swap:false       -> members coexist; capture <-> cleanup never unloads.     #
+    #     exclusive:false  -> does NOT evict your other (ungrouped) models.           #
+    #     persistent:true  -> kept resident once loaded; a big-model load can't evict #
+    #                         it (enables coexistence). Loads on 1st request, not boot #
+    #   COEXISTENCE: whisper-npu-asr is GPU-free (runs on the NPU). qwen-clean-2b      #
+    #   sits on GPU 0 (ZOTAC), which the 3-GPU --fit models (laguna-s-2.1 /            #
+    #   qwen3.5-122B / Qwen3.6-27B-Q8) ALSO use -- don't run those concurrently with  #
+    #   CLEANUP, or GPU 0 will OOM (the NPU ASR still works). The 2-GPU entries       #
+    #   (vLLM TP + the -sm tensor TP entry, pinned to idx 1,2) coexist with it fine.   #
+    # ############################################################################## #
+groups:
+  "gemma-resident":
+    swap: false
+    exclusive: false
+    persistent: false
+    # ZOTAC voice stack; Tabby Qwen EXL3 now shares the card (2026-09-24).
+    #   swap:false       -> members coexist; loading one never unloads another.
+    #   exclusive:false  -> does NOT evict your other (ungrouped) models.
+    #   persistent:false -> (was true until 2026-09-30) Strata is now the only
+    #                       persistent model. An exclusive or ungrouped load can
+    #                       evict these; they reload on demand onto the ZOTAC,
+    #                       which Strata does not use, so they coexist with it.
+    #                       Gemma and s1-mini are no longer preloaded.
+    # Qwen's 7.5 GiB split coexists with Gemma E4B only at -c 102400.
+    # Gemma is in `preload`, so a llama-swap restart restores it.
+    # A llama-swap restart may load it again.
+    # MEMBERSHIP MATTERS: a preloaded model absent from this group is ungrouped
+    # and can evict the other residents when it starts.
+    # chatterbox-turbo joined in 2026-09-12 so its first TTS request would not
+    # unload Gemma E4B and s1-mini.
+    # qwen-clean-2b and parakeet-asr remain unlisted on-demand fallbacks.
+    # Do not load them while Qwen EXL3 uses the ZOTAC. s1-mini remains cleanup.
+    # qwen-clean-2b is only its fallback/A-B entry.
+    members:
+      - gemma-4-E4B-MTP
+      - whisper-npu-asr
+      - s1-mini
+      - chatterbox-turbo
+  # "factory-resident" (persistent, held Q3.8-27B-IQ4XS on the 3090 + 5070 Ti)
+  # was REMOVED 2026-09-30: Strata is the only persistent model, and two persistent
+  # models on the same cards cannot evict each other. The 27B went back into
+  # qwen38-workload with the other models on those cards.
+  "qwen35-9b":
+    swap: true
+    exclusive: false
+    persistent: false
+    # STOP UNGROUPED EVICTION (2026-09-13). Q3.5-9B-Q4 moved from ZOTAC to
+    # MSI (57bbb375) on 2026-09-12 but stayed out of every group. Ungrouped
+    # loading evicts residents; this caused the factory model to vanish mid-Task
+    # (see gemma-resident and the chatterbox-turbo precedent).
+    #   exclusive:false -> this group does not evict other models when it loads.
+    # It shares no card with the factory model (MSI vs 3090 + 5070 Ti).
+    # NOTE: other models are still ungrouped and carry the same hazard --
+    # Q3.6-35B-Q4, laguna-s-2.1-mainline, muse-glimmer-30B-dflash-vision,
+    # gemma-4-31B-Q4-MTP, gemma-4-26B-MoE-MTP.
+    # Give them a group too if they start evicting residents.
+    members:
+      - Q3.5-9B-Q4
+  "qwen38-workload":
+    swap: true
+    exclusive: false
+    persistent: false
+    # Q3.8-27B-Q6KM uses the same 3090 + 5070 Ti pair as Flash-Next/TP, so it
+    # must swap with those entries. Otherwise --fit saw only the 5060 Ti.
+    # (Q6 held the other cards) and Flash-Next ran on about one GPU.
+    # Requesting a qwen38-workload member evicts other group members; persistent
+    # resident groups (Gemma/dictation) are not evicted.
+    # Q3.8-27B-IQ4XS was removed on 2026-09-13 (made persistent in
+    # `factory-resident`) and came BACK on 2026-09-30 when that group was dropped.
+    # NOTE: no member here can load while persistent Strata holds the 3090 +
+    # 5070 Ti -- unload Strata first (curl -X POST .../api/models/unload/Strata-IQ3XXS).
+    members:
+      # EnGram Explorer backend (reasoning-off clone of Q3.8-FN-AC-IQ4_XS).
+      - Q3.8-FN-AC-IQ4_XS-explore
+      - Q3.8-27B-IQ4XS
+      - Q3.8-27B-Q6KM
+      - Q3.8-27B-IQ4XS-DF2
+      # 2026-09-18: non-MTP Flash-Next entries were removed at Jim's request;
+      # MTP variants are in use. They use the same 3-card set (5070 Ti, MSI,
+      # 3090). CAUTION: an ungrouped non-MTP request does not swap and could
+      # oversubscribe VRAM. Add it back here before using it again.
+      - Q3.8-FN-AC-IQ4XS-MTP
+      # Hemmingway uses the same 3090 + 5070 Ti pair as Q6KM, so it swaps here.
+      # NAME MUST MATCH THE MODEL KEY (`Hemmingway`, near line 844). The old
+      # nonexistent name emitted a warning and left llama-swap serving the
+      # previous config on reload.
+      - Hemmingway
+      # Swift-1.5-27B-Q6KS uses the same 3090 + 5070 Ti pair (and needs the
+      # Q6KM-262K tensor split), so it swaps here too.
+      - Swift-1.5-27B-Q6KS
+      # Q3.8-FN-GSQ-RCO-Q2_0-MTP uses the same 3-card set and target, with MTP
+      # draft speculation instead of ngram-mod.
+      - Q3.8-FN-GSQ-RCO-Q2_0-MTP
+      # Q3.8-FN-Swift-IQ3_XXS (added 2026-09-26) uses the same 3 cards
+      # (5070 Ti + MSI 5060 Ti + 3090). Kept here for the same reason the
+      # non-MTP entries were: an ungrouped 3-card request does not swap and
+      # can oversubscribe VRAM.
+      - Q3.8-FN-Swift-IQ3_XXS
+      # EXL3 uses these compute GPUs; swap with Qwen3.8 workloads.
+      - Q3.8-FN-EXL3
+  "strata":
+    swap: true
+    exclusive: true
+    persistent: true
+    # STRATA (2026-09-30). The resident model: runs on the 5070 Ti + 3090
+    # ("gpu": [2, 1] in ~/Strata/strata-iq3_xxs.json), 262K context,
+    # --mmap-experts. Serves the `subagent` alias and the librarian curator.
+    #   exclusive:true   -> loading it evicts the other (non-persistent) models,
+    #                      freeing the cards while its engine allocates.
+    #   persistent:true  -> nothing evicts it; it is the ONLY persistent model and
+    #                      the only preloaded one, so a llama-swap restart brings it
+    #                      back. Anything else wanting the 3090 or 5070 Ti (the
+    #                      qwen38-workload models) cannot load until you unload it.
+    #   swap:true        -> only one member, so it mostly marks the group as
+    #                       swappable against the ungrouped entries.
+    members:
+      - Strata-IQ3XXS
