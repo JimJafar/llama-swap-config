@@ -86,8 +86,8 @@ def chat(base, model, prompt, max_tokens, timeout=1800):
     return res
 
 
-# The voice stack (ZOTAC + NPU) stayed loaded in the 2026-10-09 baseline.
-KEEP = ("whisper-npu-asr", "s1-mini", "chatterbox-turbo")
+# The voice stack (ZOTAC + NPU) stayed loaded in the 2026-10-09 baseline; h2o-lightning-4b (ZOTAC) joined it later.
+KEEP = ("whisper-npu-asr", "s1-mini", "chatterbox-turbo", "h2o-lightning-4b")
 
 
 def unload_others(base, model):
@@ -108,13 +108,16 @@ def main():
     ap.add_argument("models", nargs="+")
     ap.add_argument("--base", default="http://127.0.0.1:8033")
     ap.add_argument("--out", default=str(HERE / "results" / "llm.jsonl"))
+    ap.add_argument("--no-unload", action="store_true",
+                    help="skip unloading other llama-swap models (for a server outside llama-swap)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     for model in a.models:
         rec = {"model": model, "date": time.strftime("%Y-%m-%d %H:%M")}
         try:
-            unload_others(a.base, model)
+            if not a.no_unload:
+                unload_others(a.base, model)
             t0 = time.perf_counter()
             chat(a.base, model, "Reply with OK.", 8)
             rec["load_s"] = round(time.perf_counter() - t0, 1)
