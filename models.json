@@ -335,7 +335,7 @@
           "input": [
             "text"
           ],
-          "id": "clef-flash",
+          "id": "h2o-lightning-4b",
           "contextWindow": 16384,
           "maxTokens": 15564
         },

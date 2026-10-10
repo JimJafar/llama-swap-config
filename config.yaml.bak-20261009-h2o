@@ -708,7 +708,7 @@ models:
     # here (or to `subagent`) swaps back: ~1 min reload per switch.
     # PERSISTENT SINCE 2026-10-03: non-persistent, it was evicted by EVERY dictation
     # request -- llama-swap applies the resident group's `exclusive` on each request to a
-    # member (s1-mini, whisper, chatterbox, h2o-lightning-4b), not only when one loads.
+    # member (s1-mini, whisper, chatterbox, clef-flash), not only when one loads.
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_s
@@ -1809,30 +1809,33 @@ models:
       --port 8080
     cmdStop: docker stop s1mini
 
-    # --- SYSTEM 1: h2o-lightning-4b on the ZOTAC with the voice stack (2026-10-09) ---
-    # Replaced clef-flash (Cloudflare, a Qwen3.5-9B fine-tune; its IQ4_XS GGUF was deleted).
-    # h2oai/h2o-lightning-4b: a Qwen3.5-4B decision model (choice / yes-no / score
-    # questions about a record). Thinking OFF.
-    # QUANT: mradermacher/h2o-lightning-4b-GGUF Q4_K_M (2,708,804,928 bytes, sha256
-    # a2856d3e...a56d461, checked). Static quant, text only (no mmproj).
-    # HOW H2O SERVES IT: vLLM plus their stdlib shim (h2o_lightning_shim.py, POST
-    # /v1/systemone), which renders a fixed prompt and reads the label tokens' logprobs from
-    # ONE output token. The shim needs vLLM's `logprob_token_ids`, which llama-server lacks,
-    # so here it is a plain chat endpoint. To mimic the shim: system prompt "You are a
-    # decision engine. You read a record and answer one question about it by choosing
-    # exactly one option. Reply with a single letter.", lettered options, max_tokens 1,
-    # and `logprobs` + `top_logprobs` for the probabilities.
-    # MEASURED 2026-10-09 (test instance, same flags): loads in ~2 s, ~3.4 GiB on the
-    # ZOTAC (clef-flash 5.1); a 3-option ticket triage answered "A" correctly, prompt in 53 ms.
-    # --fit on + --fit-target 512: if the card is fuller at load time, layers go to the
-    # CPU (slow) instead of the load failing.
-  h2o-lightning-4b:
+    # --- SYSTEM 1: clef-flash on the ZOTAC with the voice stack (added 2026-10-03) ---
+    # Cloudflare/clef-flash: a Qwen3.5-9B fine-tune (arch qwen35, multimodal) that "turns
+    # a state and a schema of typed questions into decisions"; inputs up to 16,384 tokens
+    # (the card's encode_record default). A System 1 model like s1-mini: thinking OFF.
+    # Prompts should follow Cloudflare's state + schema format -- asked for ad-hoc JSON
+    # it answered correctly but wrote malformed JSON.
+    # QUANT: bartowski IQ4_XS (4.87 GiB, SHA-256 checked). Q5_K_S (6.05 GiB, still in
+    # /mnt/shared/models) does NOT fit beside ComfyUI's text encoder (6.8 GB on this
+    # card), chatterbox and s1-mini: --fit put 24 of 33 layers on the GPU, 10 tok/s.
+    # MEASURED 2026-10-03, IQ4_XS, everything on the ZOTAC: 5125 MiB projected vs 5804
+    # free (card 15.2 of 16.3 GiB, ~1 GiB left for the encoder's activations); warm
+    # prompt 1588 tok/s, decode 76 tok/s.
+    # --fit on + --fit-target 512: normally every layer is on the GPU; if the card is
+    # fuller at load time it offloads layers to the CPU (slow) instead of failing.
+    # Text only: the vision projector (mmproj, 0.92 GB) is not loaded -- no room.
+    # Built with llama.cpp b11279; this image is b11277 and loads it fine (qwen35 is
+    # not a new arch). --reasoning off replaces the deprecated enable_thinking kwarg.
+    # Gemma-4-E4B (on demand, ZOTAC, ~7.5 GiB) cannot share the card with it: loading
+    # this (resident, exclusive) evicts Gemma; requesting Gemma while this is loaded
+    # fails with an out-of-memory error.
+  clef-flash:
     cmd: |
-      docker run --rm --name h2olightning --runtime nvidia --cap-add SYS_ADMIN
+      docker run --rm --name clefflash --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/h2o-lightning-4b.Q4_K_M.gguf
+      -m /models/Cloudflare_clef-flash-IQ4_XS.gguf
       --jinja
       --reasoning off
       --fit on
@@ -1844,7 +1847,7 @@ models:
       --timeout 900
       --host 0.0.0.0
       --port 8080
-    cmdStop: docker stop h2olightning
+    cmdStop: docker stop clefflash
 
     # --- TTS: chatterbox-turbo, permanently resident on the ZOTAC (added 2026-09-12) ---
     # ResembleAI Chatterbox-Turbo distilled to GGUF by cstr and served by CrispASR
@@ -1995,9 +1998,9 @@ groups:
       - whisper-npu-asr
       - s1-mini
       - chatterbox-turbo
-      # h2o-lightning-4b (2026-10-09, replaced clef-flash): the System 1 decision model
-      # on the ZOTAC. Not preloaded: it loads on its first request and then stays.
-      - h2o-lightning-4b
+      # clef-flash (2026-10-03): the System 1 decision model on the ZOTAC. Not
+      # preloaded: it loads on its first request and then stays, like chatterbox.
+      - clef-flash
   "strata-iq3s":
     swap: true
     exclusive: true
