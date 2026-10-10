@@ -708,7 +708,7 @@ models:
     # here (or to `subagent`) swaps back: ~1 min reload per switch.
     # PERSISTENT SINCE 2026-10-03: non-persistent, it was evicted by EVERY dictation
     # request -- llama-swap applies the resident group's `exclusive` on each request to a
-    # member (s1-mini, whisper, chatterbox, h2o, bge-m3), not only on load.
+    # member (s1-mini, whisper, chatterbox, h2o-lightning-4b), not only when one loads.
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_s
@@ -1614,34 +1614,23 @@ models:
     # EMBEDDING MODELS #
     # ################ #
 
-    # bge-m3 (2026-10-10): markdown-rag's embedding model (vault + email search
-    # on :8123, ~/code/markdown-rag). ZOTAC only, ~0.9 GiB, always resident
-    # ("resident" group): markdown-rag embeds every query with it.
-    # 8 slots x 4096 tokens: markdown-rag sends 8 parallel batches of 16
-    # chunks of up to 2,000 characters; an embedding input must fit one
-    # ubatch (-b/-ub).
-    # The old entry spanned the 3090 + 5070 Ti + MSI with YaRN rope scaling
-    # (0.75), which distorts bge-m3's vectors (it handles 8K natively). It had
-    # no callers.
-    # The index was embedded with exactly this GGUF and these flags: changing
-    # either means re-embedding all ~41K chunks (about 10 minutes).
   bge-m3:
     unlisted: true
     cmd: |
       docker run --rm --name bge --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/shared/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/bge-m3-FP16.gguf
-      --embeddings
-      -c 32768
-      -b 4096
-      -ub 4096
-      -np 8
-      -fa on
-      --load-mode none
       --host 0.0.0.0
       --port 8080
+      --ctx-size 8192
+      --batch-size 8192
+      --rope-scaling yarn
+      --rope-freq-scale 0.75
+      -ngl 99
+      --embeddings
+      --load-mode none
     cmdStop: docker stop bge
 
     # Qwen3-Embedding-4B (added 2026-07-04): upgrade over bge-m3 for CODE retrieval.
@@ -1820,22 +1809,23 @@ models:
       --port 8080
     cmdStop: docker stop s1mini
 
-    # --- SYSTEM 1: h2o-lightning-4b, ZOTAC, beside the voice stack ---
-    # Added 2026-10-09, replacing clef-flash (Cloudflare, a Qwen3.5-9B
-    # fine-tune; its GGUF was deleted). h2oai/h2o-lightning-4b: a Qwen3.5-4B
-    # decision model (choice / yes-no / score questions about a record).
-    # Thinking OFF.
-    # QUANT: mradermacher/h2o-lightning-4b-GGUF Q4_K_M (2,708,804,928 bytes,
-    # sha256 a2856d3e...a56d461, checked). Static quant, text only (no mmproj).
-    # USE IT THROUGH THE SHIM: pm2 app h2o-shim, POST :8741/v1/systemone, H2O's
-    # typed JSON API with calibrated probabilities. It is H2O's own shim over
-    # this entry (~/llama-swap/h2o-shim; llama_backend.py swaps its vLLM client
-    # for llama-server) and matches H2O's published example within ~0.01.
-    # This entry on its own is a plain chat endpoint.
-    # MEASURED 2026-10-09: loads in ~2 s, ~3.4 GiB on the ZOTAC (clef-flash
-    # took 5.1).
-    # --fit on + --fit-target 512: if the card is fuller at load time, layers go
-    # to the CPU (slow) instead of the load failing.
+    # --- SYSTEM 1: h2o-lightning-4b on the ZOTAC with the voice stack (2026-10-09) ---
+    # Replaced clef-flash (Cloudflare, a Qwen3.5-9B fine-tune; its IQ4_XS GGUF was deleted).
+    # h2oai/h2o-lightning-4b: a Qwen3.5-4B decision model (choice / yes-no / score
+    # questions about a record). Thinking OFF.
+    # QUANT: mradermacher/h2o-lightning-4b-GGUF Q4_K_M (2,708,804,928 bytes, sha256
+    # a2856d3e...a56d461, checked). Static quant, text only (no mmproj).
+    # HOW H2O SERVES IT: vLLM plus their stdlib shim (h2o_lightning_shim.py, POST
+    # /v1/systemone), which renders a fixed prompt and reads the label tokens' logprobs from
+    # ONE output token. The shim needs vLLM's `logprob_token_ids`, which llama-server lacks,
+    # so here it is a plain chat endpoint. To mimic the shim: system prompt "You are a
+    # decision engine. You read a record and answer one question about it by choosing
+    # exactly one option. Reply with a single letter.", lettered options, max_tokens 1,
+    # and `logprobs` + `top_logprobs` for the probabilities.
+    # MEASURED 2026-10-09 (test instance, same flags): loads in ~2 s, ~3.4 GiB on the
+    # ZOTAC (clef-flash 5.1); a 3-option ticket triage answered "A" correctly, prompt in 53 ms.
+    # --fit on + --fit-target 512: if the card is fuller at load time, layers go to the
+    # CPU (slow) instead of the load failing.
   h2o-lightning-4b:
     cmd: |
       docker run --rm --name h2olightning --runtime nvidia --cap-add SYS_ADMIN
@@ -2005,12 +1995,9 @@ groups:
       - whisper-npu-asr
       - s1-mini
       - chatterbox-turbo
-      # h2o-lightning-4b (2026-10-09, replaced clef-flash): the System 1 model
-      # on the ZOTAC. Not preloaded: it loads on its first request, then stays.
+      # h2o-lightning-4b (2026-10-09, replaced clef-flash): the System 1 decision model
+      # on the ZOTAC. Not preloaded: it loads on its first request and then stays.
       - h2o-lightning-4b
-      # bge-m3 (2026-10-10): markdown-rag's embeddings, ZOTAC, ~0.9 GiB. Not
-      # preloaded: markdown-rag's first query or sync loads it.
-      - bge-m3
   "strata-iq3s":
     swap: true
     exclusive: true
