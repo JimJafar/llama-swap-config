@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host<->GPU copy bandwidth per GPU over PCIe (pinned host memory, 256 MiB, best of 20).
 
-Run with a torch-enabled Python, e.g. ~/comfyui/ComfyUI/.venv/bin/python bench/pcie_bw.py
+Run with a torch-enabled Python, e.g. ~/lab/comfyui/ComfyUI/.venv/bin/python bench/pcie_bw.py
 Needs ~256 MiB free VRAM on each card. Also prints the negotiated PCIe link, read
 from sysfs WHILE a copy is running (idle cards drop to 2.5 GT/s).
 """

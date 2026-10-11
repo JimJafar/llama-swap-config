@@ -583,10 +583,10 @@ models:
     cmdStop: docker stop qwen38-swift-iq3
 
   Strata-IQ3XXS:
-    # 2026-10-03: ENGINE 0.1.37, AND IT NOW RUNS THE marvin-tuned FORK (~/Strata-marvin,
-    # selected by ~/Strata/variant.env; engine config strata-iq3_xxs-marvin.json there):
+    # 2026-10-03: ENGINE 0.1.37, AND IT NOW RUNS THE marvin-tuned FORK (~/lab/Strata-marvin,
+    # selected by ~/lab/Strata/variant.env; engine config strata-iq3_xxs-marvin.json there):
     # a pinned hot-expert RAM tier across the split. vs official 0.1.37: prompts +44..+115%,
-    # decode +12..+20%, ~20 GiB pinned. ~/Strata-marvin/MARVIN.md has the what and why; the
+    # decode +12..+20%, ~20 GiB pinned. ~/lab/Strata-marvin/MARVIN.md has the what and why; the
     # notes below describe the official setup (delete variant.env to return to it).
     # 2026-10-01: NOW THE BASE MODEL. Qwen3.8-Flash-Next GSQ-RCO IQ3_XXS (ISTA-DASLab),
     # engine 0.1.31, launcher run-strata-qwen.sh, engine config strata-iq3_xxs.json
@@ -672,7 +672,7 @@ models:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_xxs
-    cmd: /home/jim/Strata/run-strata-qwen.sh ${PORT}
+    cmd: /home/jim/lab/Strata/run-strata-qwen.sh ${PORT}
     # `subagent` is on Strata-IQ3S while Jim evaluates it (2026-10-03); move it back
     # here (and Strata-IQ3XXS back into the preload lists) to return to IQ3_XXS.
     # RUNAWAY GUARD (2026-10-01). A request with NO max_tokens gets the whole context as
@@ -692,7 +692,7 @@ models:
   Strata-IQ3S:
     # 2026-10-03, FOR COMPARISON WITH Strata-IQ3XXS (Jim is trying both before choosing).
     # Qwen3.8-Flash-Next GSQ-RCO IQ3_S, the bigger quant ("matches the full model"), on
-    # the marvin-tuned fork: engine config ~/Strata-marvin/strata-iq3_s-marvin.json
+    # the marvin-tuned fork: engine config ~/lab/Strata-marvin/strata-iq3_s-marvin.json
     # (--resident-budget-gib 30 -> 27.8 GiB pinned, ~16 GiB RAM left available;
     # --vram-reserve-mib 957, as the engine asked). Files in /mnt/shared/models/
     # Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S; shard 2 (the PLE/engram table) is a symlink to the
@@ -712,7 +712,7 @@ models:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_s
-    cmd: /home/jim/Strata/run-strata-qwen-iq3s.sh ${PORT}
+    cmd: /home/jim/lab/Strata/run-strata-qwen-iq3s.sh ${PORT}
     # THE DEFAULT WHILE JIM EVALUATES IQ3_S (2026-10-03, his call): `subagent` (the factory
     # builder role, the librarian curator) points here, and this is the preloaded Strata.
     aliases: [subagent]
@@ -1710,12 +1710,12 @@ models:
   whisper-npu-asr:
     checkEndpoint: /health
     env:
-      - LD_LIBRARY_PATH=/home/jim/npu-env/lib/python3.13/site-packages/openvino/libs
+      - LD_LIBRARY_PATH=/home/jim/lab/npu-env/lib/python3.13/site-packages/openvino/libs
       # Runs on the NPU. Pinned to NO GPU so it can never claim ZOTAC VRAM.
       - CUDA_VISIBLE_DEVICES=
     cmd: |
       # SIGTERM on unload is clean (uvicorn shuts down); no cmdStop needed.
-      /home/jim/npu-env/bin/python /home/jim/llama-swap/npu/asr_server.py --port ${PORT}
+      /home/jim/lab/npu-env/bin/python /home/jim/llama-swap/npu/asr_server.py --port ${PORT}
       --model-dir /mnt/shared/models/distil-medium.en-npu
 
       # --- ASR FALLBACK: NVIDIA Parakeet TDT 0.6B (ONNX) via achetronic/parakeet ------------
@@ -1894,16 +1894,16 @@ models:
   chatterbox-turbo:
     checkEndpoint: /health
     env:
-      - LD_LIBRARY_PATH=/home/jim/crispasr/crispasr-linux-x86_64-cuda13
+      - LD_LIBRARY_PATH=/home/jim/lab/crispasr/crispasr-linux-x86_64-cuda13
       # ZOTAC only -- this entry must never see another card.
       - CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
     cmd: |
       # SIGTERM on unload is clean (server shuts down); no cmdStop needed.
-      /home/jim/crispasr/crispasr-linux-x86_64-cuda13/crispasr
+      /home/jim/lab/crispasr/crispasr-linux-x86_64-cuda13/crispasr
       --server
       --backend chatterbox-turbo
       -m auto
-      --voice-dir /home/jim/crispasr/voices
+      --voice-dir /home/jim/lab/crispasr/voices
       --port ${PORT}
     # No cmdStop: llama-swap SIGTERMs the process directly.
 
@@ -1996,7 +1996,7 @@ groups:
     #   persistent:true  -> nothing evicts a member. Anything else wanting the 3090 or
     #                       5070 Ti (the qwen38-workload models) cannot load until you
     #                       unload Strata.
-    # Strata: "gpu": [2, 1] in ~/Strata/strata-iq3_xxs.json, 262K context,
+    # Strata: "gpu": [2, 1] in ~/lab/Strata/strata-iq3_xxs.json, 262K context,
     # --mmap-experts; serves the `subagent` alias and the librarian curator.
     # chatterbox-turbo is not preloaded (preload warms with a chat request, which
     # 404s on a TTS backend); it loads on its first request and then stays.

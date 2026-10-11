@@ -7,7 +7,7 @@ For each model, ComfyUI first unloads everything (POST /free), then renders
   1. 1024x1024  -- COLD: includes loading the diffusion model, text encoder and VAE
   2. 1920x1088  -- WARM: models already loaded (same prompt, so the text encoding is cached)
 Time per image is ComfyUI's own execution_start -> execution_success. Graphs are the ones
-used day to day (Klein: ~/comfyui/workflows/flux2-klein-9b.json; Qwen: the official
+used day to day (Klein: ~/lab/comfyui/workflows/flux2-klein-9b.json; Qwen: the official
 "Qwen Image 2.1: Text to Image" template, prompt enhancer off), with fixed prompts and seeds.
 Images are saved in ComfyUI/output as hwbench-*.
 """

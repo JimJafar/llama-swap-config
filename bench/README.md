@@ -55,7 +55,7 @@ record 48 threads (`nproc`) and 24. Compare **triad**.
 ## 2. PCIe host<->GPU bandwidth (about 30 seconds)
 
 ```sh
-~/comfyui/ComfyUI/.venv/bin/python ~/llama-swap/bench/pcie_bw.py
+~/lab/comfyui/ComfyUI/.venv/bin/python ~/llama-swap/bench/pcie_bw.py
 ```
 
 This copies 256 MiB of pinned memory to and from each GPU (best of 20). It also prints
@@ -92,7 +92,7 @@ The graphs are built inside the script.
 
 ### FLUX.2 Klein 9B
 
-This is `~/comfyui/workflows/flux2-klein-9b.json`.
+This is `~/lab/comfyui/workflows/flux2-klein-9b.json`.
 
 | Setting | Value |
 |---|---|
