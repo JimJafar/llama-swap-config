@@ -2,13 +2,13 @@
 # Strata launcher for llama-swap:  run-strata.sh PORT CONFIG [OTHER]
 #
 # Runs the official Strata checkout (~/lab/Strata: its serve/server.py, .venv and
-# engine) with one of the engine configs here (strata-iq3_s.json, strata-iq3_xxs.json).
+# engine) with an engine config here (strata-iq3_s.json).
 #
-# OTHER: the llama-swap model that uses the same two cards (Strata-IQ3S and
-# Strata-IQ3XXS need the 5070 Ti + 3090). Both are persistent, so llama-swap never
-# evicts one for the other; this unloads OTHER itself, but only once it is idle (no
-# request running or queued), up to STRATA_WAIT_S: llama-swap's unload API stops a
-# model at once, which killed requests mid-answer.
+# OTHER (optional): another persistent llama-swap model that needs the same cards.
+# llama-swap never evicts one persistent model for another, so this unloads OTHER
+# itself, but only once it is idle (no request running or queued), up to
+# STRATA_WAIT_S: llama-swap's unload API stops a model at once, which killed requests
+# mid-answer. Unused since Strata-IQ3XXS was deleted (2026-10-12).
 #
 # A/B testing: ab.env next to this script, when present, is read after the arguments
 # and may set CONFIG (another engine config) and engine env vars (exported). The

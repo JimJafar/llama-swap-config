@@ -4,7 +4,7 @@
 - Model list = every entry in config.yaml `models:` that is not `unlisted`
   and not in EXCLUDES.
 - Model id = the entry's first `aliases` value when it has one, else the config
-  key (e.g. Strata-IQ3XXS -> `subagent`). llama-swap routes either name, but pi
+  key (e.g. Strata-IQ3S -> `subagent`). llama-swap routes either name, but pi
   sends models.json's id as `model`, and the alias is the name meant for clients.
   An aliased model is ALSO listed under its config key (same fields), so pi shows
   the real model name beside the alias (2026-09-30).
@@ -74,7 +74,6 @@ CONTEXT_OVERRIDES: dict[str, int] = {}
 # hard-coded 65536 went stale when Swift moved to 262144 on 2026-09-30).
 STRATA_CONFIGS: dict[str, Path] = {
     # 2026-10-12: Marvin's tuned configs in strata/ (official Strata 0.1.43; the fork is retired)
-    "Strata-IQ3XXS": Path(__file__).resolve().parent / "strata" / "strata-iq3_xxs.json",
     "Strata-IQ3S": Path(__file__).resolve().parent / "strata" / "strata-iq3_s.json",
 }
 
@@ -211,7 +210,7 @@ THINKING_WIRING = [
             },
         },
     },
-    # Strata (ids Strata-IQ3XXS / Strata-IQ3S / subagent), the Qwen3.8-Flash-Next engine
+    # Strata (ids Strata-IQ3S / subagent), the Qwen3.8-Flash-Next engine
     # behind a proxy. It is OpenAI-compatible and takes the standard top-level
     # `reasoning_effort` field, so thinkingFormat "openai" -- NOT the chat-template
     # mechanism used above, and no chat-template kwargs at all. It does not
@@ -349,7 +348,7 @@ def main() -> None:
         new_models.append(keep)
         if model_id != name:
             # Also list the model under its config key, so pi shows the real model
-            # (Strata-IQ3XXS) beside the alias (subagent). llama-swap routes
+            # (Strata-IQ3S) beside the alias (subagent). llama-swap routes
             # both names to the same process. The copy is taken after the curated
             # fields and context are settled, so the two entries never disagree.
             twin = {**keep, "id": name}

@@ -10,7 +10,7 @@ usage: bench.py LABEL [--reps N] [--quick] [--long]
 import gzip, json, os, sys, time, uuid, glob, statistics, argparse, urllib.request, pathlib
 
 URL = "http://127.0.0.1:8033/v1/chat/completions"
-MODEL = os.environ.get("STRATA_MODEL", "Strata-IQ3XXS")
+MODEL = os.environ.get("STRATA_MODEL", "Strata-IQ3S")
 OUT = pathlib.Path(__file__).resolve().parent / "results"
 
 # The prompts: the start (prefill cases) and end (agent case) of Strata's src, docs and

@@ -1,13 +1,13 @@
 # Strata on Marvin
 
-[Strata](https://github.com/Niko1221/Strata) serves Qwen3.8-Flash-Next (GSQ-RCO IQ3_S and IQ3_XXS) across the RTX 5070 Ti and RTX 3090, with the experts that don't fit in VRAM in RAM. llama-swap runs it as `Strata-IQ3S` (the preloaded one, alias `subagent`) and `Strata-IQ3XXS`.
+[Strata](https://github.com/Niko1221/Strata) serves Qwen3.8-Flash-Next GSQ-RCO IQ3_S across the RTX 5070 Ti and RTX 3090, with the experts that don't fit in VRAM in RAM. llama-swap runs it as `Strata-IQ3S` (preloaded, alias `subagent`). The IQ3_XXS quant (`Strata-IQ3XXS`) was deleted on 2026-10-12.
 
 The official checkout is `~/lab/Strata`: its engine, `serve/server.py`, `.venv`, the expert profile. Marvin's own files live here:
 
 | File | What |
 |---|---|
-| `run-strata.sh PORT CONFIG [OTHER]` | The launcher llama-swap runs. `OTHER` is the Strata that shares the two cards: it is unloaded once idle. |
-| `strata-iq3_s.json`, `strata-iq3_xxs.json` | The tuned engine configs, with their `.shared-settings.json` (defaults for requests that set none: reasoning effort medium, 16K max tokens) |
+| `run-strata.sh PORT CONFIG [OTHER]` | The launcher llama-swap runs. `OTHER`, optional, is another persistent model on the same cards, unloaded once idle. |
+| `strata-iq3_s.json` | The tuned engine config, with its `.shared-settings.json` (defaults for requests that set none: reasoning effort medium, 16K max tokens) |
 | `ram-guard.sh` | Unloads Strata if available RAM drops below 2 GB (run by hand: `setsid nohup ~/llama-swap/strata/ram-guard.sh 2048 &`; it does not survive a reboot) |
 | `ab/bench.py`, `ab/sweep.py` | The A/B harness, through llama-swap; results in `ab/results/` |
 
@@ -17,12 +17,12 @@ Until 2026-10-12 this was a fork (`JimJafar/Strata`, branches `marvin-tuned*`), 
 
 What 0.1.43's `setup.sh` writes for this box (`~/lab/Strata/strata-iq3_s.json`) is the arena: every expert no card holds is pinned in RAM, KV streaming off, 13 pool workers. With 64 GB of RAM that leaves the machine almost nothing (setup itself says IQ3_S needs ~62 of the 62 GB), so the configs here are hand-edited instead:
 
-- `--mmap-experts --resident-budget-gib 30` (IQ3_S) / `22` (IQ3_XXS): experts are read from the GGUF in place, and only the budget is pinned (the uncached experts first, then the cards' prompt loans). About 16 GiB of RAM stays available on IQ3_S.
+- `--mmap-experts --resident-budget-gib 30`: experts are read from the GGUF in place, and only the budget is pinned (the uncached experts first, then the cards' prompt loans). About 16 GiB of RAM stays available on IQ3_S.
 - `--kv-resident 32768`: KV streaming, so the 262K context fits.
 - `--max-context 262144`: setup caps lower on 62 GB.
 - `--pool-workers 8`: 8 to 14 were measured equal once the misses are pinned, 19 was 5-9% slower (0.1.37). Re-checked against setup's 13 on 0.1.43: see below.
 - `--pipeline-windows 2`: the 5070 Ti starts the next verify window while the 3090 finishes this one. Code decode +25%, prose and prompts level (0.1.40). It keeps 278 MiB of the 5070 Ti out of the expert cache.
-- `--vram-reserve-mib 957` (IQ3_S): what the engine asked for; 350 was too little for the verify buffers.
+- `--vram-reserve-mib 957`: what the engine asked for; 350 was too little for the verify buffers.
 - `"fit_max_tokens": true`: a request asking for more than the context has left gets its cap shortened instead of a 400.
 - `"allowed_hosts": [".akita-betelgeuse.ts.net", "marvin"]`: since 0.1.40 the server refuses any Host it doesn't know (DNS-rebinding protection), and llama-swap passes on the client's Host, so every tailnet request got a 403 without it. Keep it in any new config.
 
