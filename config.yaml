@@ -583,11 +583,10 @@ models:
     cmdStop: docker stop qwen38-swift-iq3
 
   Strata-IQ3XXS:
-    # 2026-10-03: ENGINE 0.1.37, AND IT NOW RUNS THE marvin-tuned FORK (~/lab/Strata-marvin,
-    # selected by ~/lab/Strata/variant.env; engine config strata-iq3_xxs-marvin.json there):
-    # a pinned hot-expert RAM tier across the split. vs official 0.1.37: prompts +44..+115%,
-    # decode +12..+20%, ~20 GiB pinned. ~/lab/Strata-marvin/MARVIN.md has the what and why; the
-    # notes below describe the official setup (delete variant.env to return to it).
+    # 2026-10-12: OFFICIAL STRATA 0.1.43 (~/lab/Strata) with Marvin's tuned engine config
+    # strata/strata-iq3_xxs.json, through strata/run-strata.sh. The marvin-tuned fork was
+    # retired: 0.1.43 absorbed its last code change. strata/README.md has the tuning and
+    # measurements. The notes below are history (fork era and before).
     # 2026-10-01: NOW THE BASE MODEL. Qwen3.8-Flash-Next GSQ-RCO IQ3_XXS (ISTA-DASLab),
     # engine 0.1.31, launcher run-strata-qwen.sh, engine config strata-iq3_xxs.json
     # (its header lists the hand edits on top of setup). Renamed from
@@ -672,7 +671,7 @@ models:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_xxs
-    cmd: /home/jim/lab/Strata/run-strata-qwen.sh ${PORT}
+    cmd: /home/jim/llama-swap/strata/run-strata.sh ${PORT} /home/jim/llama-swap/strata/strata-iq3_xxs.json Strata-IQ3S
     # `subagent` is on Strata-IQ3S while Jim evaluates it (2026-10-03); move it back
     # here (and Strata-IQ3XXS back into the preload lists) to return to IQ3_XXS.
     # RUNAWAY GUARD (2026-10-01). A request with NO max_tokens gets the whole context as
@@ -692,7 +691,8 @@ models:
   Strata-IQ3S:
     # 2026-10-03, FOR COMPARISON WITH Strata-IQ3XXS (Jim is trying both before choosing).
     # Qwen3.8-Flash-Next GSQ-RCO IQ3_S, the bigger quant ("matches the full model"), on
-    # the marvin-tuned fork: engine config ~/lab/Strata-marvin/strata-iq3_s-marvin.json
+    # official Strata 0.1.43 (since 2026-10-12; the marvin-tuned fork before): engine
+    # config strata/strata-iq3_s.json
     # (--resident-budget-gib 30 -> 27.8 GiB pinned, ~16 GiB RAM left available;
     # --vram-reserve-mib 957, as the engine asked). Files in /mnt/shared/models/
     # Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S; shard 2 (the PLE/engram table) is a symlink to the
@@ -702,8 +702,8 @@ models:
     #   decode code 99 | prose 80 | explain 91 tok/s; agent (17K + 700) 2264 / 86
     #   = about 10-15% under IQ3_XXS on the fork, about level with official IQ3_XXS.
     # IT CANNOT RUN BESIDE Strata-IQ3XXS (same 5070 Ti + 3090). Both are persistent, so
-    # llama-swap never evicts one for the other: each launcher (run-strata-qwen.sh,
-    # STRATA_OTHER) unloads the other Strata once it is idle, then starts. A request for
+    # llama-swap never evicts one for the other: the launcher (strata/run-strata.sh, its
+    # 3rd argument) unloads the other Strata once it is idle, then starts. A request for
     # Strata-IQ3XXS by name swaps this one out once it is idle, and the next request
     # here (or to `subagent`) swaps back: ~1 min reload per switch.
     # PERSISTENT SINCE 2026-10-03: non-persistent, it was evicted by EVERY dictation
@@ -712,7 +712,7 @@ models:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_s
-    cmd: /home/jim/lab/Strata/run-strata-qwen-iq3s.sh ${PORT}
+    cmd: /home/jim/llama-swap/strata/run-strata.sh ${PORT} /home/jim/llama-swap/strata/strata-iq3_s.json Strata-IQ3XXS
     # THE DEFAULT WHILE JIM EVALUATES IQ3_S (2026-10-03, his call): `subagent` (the factory
     # builder role, the librarian curator) points here, and this is the preloaded Strata.
     aliases: [subagent]
@@ -1996,7 +1996,7 @@ groups:
     #   persistent:true  -> nothing evicts a member. Anything else wanting the 3090 or
     #                       5070 Ti (the qwen38-workload models) cannot load until you
     #                       unload Strata.
-    # Strata: "gpu": [2, 1] in ~/lab/Strata/strata-iq3_xxs.json, 262K context,
+    # Strata: "gpu": [2, 1] in strata/strata-iq3_xxs.json, 262K context,
     # --mmap-experts; serves the `subagent` alias and the librarian curator.
     # chatterbox-turbo is not preloaded (preload warms with a chat request, which
     # 404s on a TTS backend); it loads on its first request and then stays.
@@ -2022,6 +2022,6 @@ groups:
     #                      dictation request evicted it: llama-swap enforces the resident
     #                      group's `exclusive` on each request to a member, not only on load.
     # Swapping with Strata-IQ3XXS (also persistent) is done by the launchers: each
-    # unloads the other once it is idle (run-strata-qwen.sh, STRATA_OTHER).
+    # unloads the other once it is idle (strata/run-strata.sh, 3rd argument).
     members:
       - Strata-IQ3S
