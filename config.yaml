@@ -455,6 +455,16 @@ models:
     # `subagent` (the factory builder role, the librarian curator) points here, and this
     # is the preloaded Strata.
     aliases: [subagent]
+    # VOICE (2026-10-13): Home Assistant's voice assistant (Echo Show, via HA on Colin)
+    # asks for `subagent-voice`, which is this same loaded model with thinking off.
+    # HA's LiteLLM integration cannot send extra request fields itself. Measured: a
+    # short voice answer 0.5 s with reasoning_effort none vs 1.1-1.8 s at the
+    # shared-settings default (medium), and a tool-using reply makes 2-3 calls.
+    # setParamsByID creates the alias itself; `subagent` callers are unaffected.
+    filters:
+      setParamsByID:
+        "subagent-voice":
+          reasoning_effort: none
 
     # MTP entry -- OFFICIAL IMAGE since 2026-10-06. Upstream merged qwen4exp MTP (#29761,
     # 2026-10-01) plus the qwen4exp speed-ups (#29824 masks, #29825 indexer memory), so the
