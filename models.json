@@ -287,15 +287,35 @@
           ],
           "id": "voice-agent",
           "contextWindow": 16384,
-          "maxTokens": 15564
+          "maxTokens": 15564,
+          "reasoning": true,
+          "thinkingLevelMap": {},
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
+            }
+          }
         },
         {
           "input": [
             "text"
           ],
-          "id": "LFM2.5-2.6B",
+          "id": "Qwen3.5-4B",
           "contextWindow": 16384,
-          "maxTokens": 15564
+          "maxTokens": 15564,
+          "reasoning": true,
+          "thinkingLevelMap": {},
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              }
+            }
+          }
         },
         {
           "input": [
