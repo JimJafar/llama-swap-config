@@ -56,6 +56,11 @@
 # Max seconds to wait for a model to become ready after launch. Raised from the 120s
 # default for the vLLM entries (e.g. qwen36-27b-nvfp4), which take ~180s to load + capture graphs.
 healthCheckTimeout: 600
+# Models get ports from 5900 up (the default, 5800, overlapped fixed ports: alexa-marvin's
+# TTS server holds 5811, so bge-m3 drew 5811 on 2026-10-13, failed to bind and exited, and
+# s1-mini drew 5823, the port alexa-marvin's speech-to-text bridge expects for whisper).
+# Ports below 5900 are for fixed services: crispasr TTS 5811, whisper-npu-asr 5823.
+startPort: 5900
 
 # Expose model `aliases` as extra entries in /v1/models (default false). Needed
 # so API-discovering clients (not just pi's models.json) can see the alias;
@@ -84,6 +89,13 @@ hooks:
       - s1-mini
       # voice-agent (LFM2.5-2.6B): a voice reply should never wait for a load.
       - LFM2.5-2.6B
+      # 2026-10-13: the rest of the ZOTAC's resident models, so a llama-swap restart
+      # brings the whole card back: h2o (System 1) and bge-m3 (markdown-rag). All
+      # five llama.cpp/crispasr residents fit together: ~12.7 of 16 GiB with ezra-ocr.
+      # bge-m3 serves embeddings only, so its chat warm-up fails (logged), but the
+      # model is loaded and stays, as with whisper-npu-asr.
+      - h2o-lightning-4b
+      - bge-m3
 
 # Qwen 3.5/3.6/3.8 jinja template fix
 #
@@ -1466,8 +1478,12 @@ models:
       - CUDA_VISIBLE_DEVICES=
     cmd: |
       # SIGTERM on unload is clean (uvicorn shuts down); no cmdStop needed.
-      /home/jim/lab/npu-env/bin/python /home/jim/llama-swap/npu/asr_server.py --port ${PORT}
+      /home/jim/lab/npu-env/bin/python /home/jim/llama-swap/npu/asr_server.py --port 5823
       --model-dir /mnt/shared/models/distil-medium.en-npu
+    # FIXED PORT 5823 (2026-10-13): alexa-marvin's Wyoming bridge on Colin calls
+    # http://100.86.157.12:5823 directly (the server binds 0.0.0.0), so it cannot
+    # take whatever port llama-swap hands out.
+    proxy: http://127.0.0.1:5823
 
       # --- ASR FALLBACK: NVIDIA Parakeet TDT 0.6B (ONNX) via achetronic/parakeet ------------
       # Kept OUT of the dictation group since 2026-08-04: it needs the ZOTAC (GPU 0), which
@@ -1795,10 +1811,10 @@ groups:
       - s1-mini
       - chatterbox-turbo
       # h2o-lightning-4b (2026-10-09, replaced clef-flash): the System 1 model
-      # on the ZOTAC. Not preloaded: it loads on its first request, then stays.
+      # on the ZOTAC. Preloaded since 2026-10-13, so it is always loaded.
       - h2o-lightning-4b
-      # bge-m3 (2026-10-10): markdown-rag's embeddings, ZOTAC, ~0.9 GiB. Not
-      # preloaded: markdown-rag's first query or sync loads it.
+      # bge-m3 (2026-10-10): markdown-rag's embeddings, ZOTAC, ~0.9 GiB. Preloaded
+      # since 2026-10-13, so it is always loaded.
       - bge-m3
       # LFM2.5-2.6B (2026-10-13): `voice-agent`, alexa-marvin's brain, ZOTAC, ~3.4
       # GiB with its DSpark draft. Preloaded, so the first wake word answers at once.
