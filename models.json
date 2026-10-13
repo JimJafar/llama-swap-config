@@ -285,6 +285,22 @@
           "input": [
             "text"
           ],
+          "id": "voice-agent",
+          "contextWindow": 16384,
+          "maxTokens": 15564
+        },
+        {
+          "input": [
+            "text"
+          ],
+          "id": "LFM2.5-2.6B",
+          "contextWindow": 16384,
+          "maxTokens": 15564
+        },
+        {
+          "input": [
+            "text"
+          ],
           "id": "h2o-lightning-4b",
           "contextWindow": 16384,
           "maxTokens": 15564
