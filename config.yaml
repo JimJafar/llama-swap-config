@@ -96,6 +96,9 @@ hooks:
       # model is loaded and stays, as with whisper-npu-asr.
       - h2o-lightning-4b
       - bge-m3
+      # chatterbox-turbo (2026-10-13): alexa-marvin's voice, so it must come back after a
+      # restart. Its chat warm-up 404s (TTS only), but the model loads and stays.
+      - chatterbox-turbo
 
 # Qwen 3.5/3.6/3.8 jinja template fix
 #
@@ -1708,14 +1711,14 @@ models:
       - LD_LIBRARY_PATH=/home/jim/lab/crispasr/crispasr-linux-x86_64-cuda13
       # ZOTAC only -- this entry must never see another card.
       - CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-    cmd: |
-      # SIGTERM on unload is clean (server shuts down); no cmdStop needed.
-      /home/jim/lab/crispasr/crispasr-linux-x86_64-cuda13/crispasr
-      --server
-      --backend chatterbox-turbo
-      -m auto
-      --voice-dir /home/jim/lab/crispasr/voices
-      --port ${PORT}
+    # 2026-10-13: ALSO alexa-marvin's TTS, one copy. tts/run-chatterbox.sh (was
+    # ~/lab/crispasr/start-tts.sh, run by hand beside this unused entry) adds the cloned
+    # voices (voices/ralph.wav: --i-have-rights, consent log), drops the spoken AI
+    # disclaimer (Jim accepts the marking duty) and pins port 5811, which the Wyoming
+    # bridge on Colin calls through `tailscale serve --https=5811`. Its header has why.
+    # SIGTERM on unload is clean (the script execs crispasr); no cmdStop needed.
+    cmd: /home/jim/llama-swap/tts/run-chatterbox.sh
+    proxy: http://127.0.0.1:5811
     # No cmdStop: llama-swap SIGTERMs the process directly.
 
     # ############################################################################## #
