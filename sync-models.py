@@ -429,11 +429,12 @@ def main() -> None:
         settings["modelThinkingLevels"] = new_levels
         PI_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
         print(f"updated modelThinkingLevels in {PI_SETTINGS}")
-    print("sending to guybrush & ssdnodes")
+    print("sending to guybrush, colin & ssdnodes")
     src = str(Path.home() / "llama-swap/models.json")
     targets = [
         ("-P42", "ssd-nodes.akita-betelgeuse.ts.net:~/.pi/agent/models.json"),
         (None, "guybrush.akita-betelgeuse.ts.net:~/.pi/agent/models.json"),
+        (None, "colin.akita-betelgeuse.ts.net:~/.pi/agent/models.json"),
     ]
     for opt, dest in targets:
         args = ["scp", src, dest] if opt is None else ["scp", opt, src, dest]
