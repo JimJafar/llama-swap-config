@@ -118,6 +118,48 @@ Notes:
   provided text drafts well (up to 89% accepted), while the open-ended essay drafts
   poorly. Compare like with like.
 
+## GLM-5.3-Flash in Project Maya (measured 2026-10-15)
+
+Measured six days after the rest, so not part of the 2026-10-09 baseline. Run it again
+after the upgrade the same way.
+
+- **Engine:** Project Maya v1.0.34 (`~/lab/project-maya`, commit `bdd4167`), a Strata
+  fork for GLM-5.3-Flash. It keeps the experts in three tiers: VRAM, pinned RAM and the
+  NVMe drive.
+- **Model:** Maya-L (IQ3_S, 156.3 GB) in `/mnt/models/Maya-L`, with 32K context and
+  thinking set to "high". The MTP draft is used.
+- **Placement:** all four GPUs, with the auto layer split: layers 0–17 on the 3090,
+  18–26 on the MSI, 27–36 on the 5070 Ti and 37–44 on the ZOTAC.
+- **Conditions:** everything in llama-swap was unloaded first, the voice stack too,
+  and ComfyUI was freed.
+
+To repeat it:
+
+1. Unload everything: `curl -X POST localhost:8033/api/models/unload`.
+2. Start Maya: `~/lab/project-maya/run-maya-maya-l.sh`.
+3. Run the benchmark:
+   `bench/llm_bench.py glm-5.3-flash --base http://127.0.0.1:8080 --no-unload --out bench/results/llm-maya.jsonl`.
+
+| | Load | Short prompt → 2048 tok: decode (draft accept) | 29K prompt: prefill / time to first token | 29K prompt: decode (draft accept) |
+|---|---|---|---|---|
+| Maya-L, 4 GPUs | ~60 s (engine start + tier warm-up) | **9.7** (70%) | **577** / 50.9 s | **8.2** (78%) |
+
+Why it's slow:
+- **RAM:** with 64 GB, the engine could pin only ~37 GB of RAM for experts.
+- **VRAM:** the four cards hold ~55 GB of experts, so about 70% of the 156 GB model
+  lives in VRAM and RAM. The rest is read from the KIOXIA drive.
+- **The engine's own per-token statistics:**
+
+  | | 2048-token essay | 29K prompt |
+  |---|---|---|
+  | VRAM hit | 78% | 72% |
+  | Disk reads per token | 21 | 27 |
+  | Time waiting on disk | 82 of 103 ms per token | 108 of 121 ms per token |
+
+- **Expected after the upgrade:** with 256 GB of RAM the whole model fits in VRAM plus
+  RAM, so the disk waits go away. That is most of the per-token time today. Compare the
+  engine's `glm stat` lines in `~/lab/project-maya/maya-maya-l.log`.
+
 ## What to watch after the upgrade
 
 - **Prefill on the split models** (Q3.8-27B tensor-parallel, muse, gemma). These move
