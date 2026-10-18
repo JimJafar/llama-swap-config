@@ -1504,6 +1504,50 @@ models:
       ghcr.io/achetronic/parakeet:latest-cuda
     cmdStop: docker stop parakeet
 
+    # --- MOSS-Transcribe-Diarize 0.9B (PARKED 2026-10-18, revisit after the EPYC upgrade) ---
+    # Candidate replacement for whisper-npu-asr (the NPU goes with the Core Ultra CPU) and a
+    # meeting transcriber: one pass gives text, segment timestamps and speaker labels (S1, S2...).
+    # English + Chinese only. Not streaming. Apache-2.0.
+    #   Model:   /mnt/shared/models/moss-transcribe-diarize/MOSS-Transcribe-Diarize-Q8_0.gguf
+    #            (987 MB, SHA-256 2f9039f1..., from handy-computer/moss-transcribe-diarize-gguf;
+    #            Q8_0 = 1.93% WER on LibriSpeech test-clean; Q4_K_M has tail failures, avoid)
+    #   Runtime: transcribe.cpp (github.com/handy-computer/transcribe.cpp, built 2026-10-18 at
+    #            9294205b in ~/lab/transcribe.cpp with -DTRANSCRIBE_CUDA=ON
+    #            -DCMAKE_CUDA_ARCHITECTURES="86;120" -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF; the system
+    #            BLAS link fails). build/ has transcribe-cli; build-shared/ has libtranscribe.so for
+    #            the Python bindings, installed in ~/lab/transcribe-env (Python 3.12).
+    # Measured on the 3090 (transcribe-cli, warm):
+    #   5.3 s dictation           0.14 s (37x realtime), 1.7 GB VRAM, 0.7 GB RAM; word-perfect but
+    #                             starts lower-case ("make a new note...")
+    #   JFK 11 s                  0.23 s (47x), word-perfect, 3 timed segments
+    #   2 speakers, 14 s          0.38 s, speakers correct (incl. a resumed sentence)
+    #   2 speakers en/zh, 12 s    0.27 s, speakers and languages correct
+    #   5 min speech, diarize     11.1 s (28x), 2.9 GB VRAM, 0.8 GB RAM
+    #   30.6 min, diarize         200 s (9x), 10.3 GB VRAM, 1.6 GB RAM
+    #   CLI model load ~0.8-1.6 s per call, so dictation needs a resident server.
+    # VRAM grows ~0.3 GB per minute of audio (one-pass KV) and speed drops with length: an hour
+    # would need ~19 GB and ~8-10 min. For meetings, chunk into 10-15 min pieces (speaker labels
+    # then restart per chunk and need matching) or run whole files on the 3090 with Strata out.
+    # Dictation-sized requests fit beside the voice stack on the ZOTAC (~1.7 GB).
+    # MISSING: an OpenAI-compatible /v1/audio/transcriptions server that keeps the model loaded
+    # (like npu/asr_server.py). transcribe.cpp ships none; the Python bindings
+    # (transcribe_cpp.Model(path, backend="cuda").session().run(pcm_f32_16k, diarize="on"))
+    # are enough to write one. Once it exists, uncomment and adjust:
+    #
+    # moss-asr:
+    #   unlisted: true
+    #   checkEndpoint: /health
+    #   env:
+    #     - TRANSCRIBE_LIBRARY=/home/jim/lab/transcribe.cpp/build-shared/src/libtranscribe.so
+    #     - CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a   # ZOTAC, beside the voice stack
+    #   cmd: |
+    #     /home/jim/lab/transcribe-env/bin/python /home/jim/llama-swap/moss/moss_server.py
+    #     --port ${PORT}
+    #     --model /mnt/shared/models/moss-transcribe-diarize/MOSS-Transcribe-Diarize-Q8_0.gguf
+    #
+    # Then point the Diction gateway on Colin at it (CUSTOM_BACKEND_MODEL=moss-asr in
+    # ~/code/diction-gateway on Colin) and, if wanted, baruch-server.
+
     # (gemma-clean-e4b / gemma-clean-e2b removed 2026-07-26: superseded by qwen-clean-2b,
     #  which matches their quality ~40x faster. GGUFs deleted from /mnt/shared/models.)
 

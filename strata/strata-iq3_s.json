@@ -36,7 +36,7 @@
   "2"
  ],
  "cwd": "/home/jim/lab/Strata",
- "tokenizer": "/home/jim/lab/Strata-data/packs/iq3_s/tokenizer",
+ "tokenizer": "/home/jim/llama-swap/strata/tokenizer-lean",
  "model_name": "qwen3.8-flash-next-iq3_s",
  "log": "/home/jim/lab/Strata/strata-iq3_s.log",
  "lib_dirs": [
@@ -54,5 +54,13 @@
  "allowed_hosts": [
   ".akita-betelgeuse.ts.net",
   "marvin"
- ]
+ ],
+ "vision": {
+  "exe": "/home/jim/lab/Strata/engine/strata-vision",
+  "mmproj": "/mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+  "model": "/mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+  "gpu": false,
+  "max_tokens": 768,
+  "threads": 8
+ }
 }

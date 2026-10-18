@@ -1,0 +1,32 @@
+#!/bin/sh
+# shot: screenshot a web page with headless Chrome on Colin's iGPU (Vulkan), in a few seconds.
+#
+#   shot <html-file-or-url> <out.png> [WIDTHxHEIGHT] [wait-ms]
+#
+# WIDTHxHEIGHT defaults to 1600x900. wait-ms is how much page time (animation, loading) runs before the shot,
+# default 2000. Software rendering (SwiftShader) took ~2 minutes for a three.js scene on Colin; this takes ~3 s.
+# Installed on Colin as ~/.local/bin/shot; the copy in ~/llama-swap/bench/agent/ is the master.
+set -eu
+[ $# -ge 2 ] || { echo "usage: shot <html-file-or-url> <out.png> [WIDTHxHEIGHT] [wait-ms]" >&2; exit 2; }
+SRC=$1; OUT=$2; SIZE=${3:-1600x900}; WAIT=${4:-2000}
+CHROME=${SHOT_CHROME:-$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux64/chrome 2>/dev/null | sort -V | tail -1)}
+[ -x "$CHROME" ] || { echo "shot: no Chrome found under ~/.cache/ms-playwright (set SHOT_CHROME)" >&2; exit 1; }
+case "$SRC" in
+    http://*|https://*|file://*) URL=$SRC ;;
+    *) [ -f "$SRC" ] || { echo "shot: no such file: $SRC" >&2; exit 1; }
+       URL="file://$(realpath "$SRC" | sed 's/ /%20/g')" ;;
+esac
+case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac
+LOG=$(mktemp)
+if timeout 60 "$CHROME" --headless=new --no-sandbox --hide-scrollbars \
+        --use-gl=angle --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist \
+        --window-size="$(echo "$SIZE" | tr x ,)" --virtual-time-budget="$WAIT" \
+        --screenshot="$OUT" "$URL" >"$LOG" 2>&1 && [ -s "$OUT" ]; then
+    rm -f "$LOG"
+    echo "$OUT ($(stat -c %s "$OUT") bytes)"
+else
+    echo "shot: failed; Chrome's last lines:" >&2
+    tail -5 "$LOG" >&2
+    rm -f "$LOG"
+    exit 1
+fi
