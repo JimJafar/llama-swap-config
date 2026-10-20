@@ -50,34 +50,6 @@
           }
         },
         {
-          "id": "Q3.8-FN-AC-IQ4XS-MTP",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 196608,
-          "maxTokens": 186777,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          }
-        },
-        {
           "id": "Q3.8-27B-Q6KM",
           "input": [
             "text"
