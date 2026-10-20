@@ -45,7 +45,7 @@ DIRECT_URL = os.environ.get("DIRECT_URL", "http://127.0.0.1:5804")
 MODEL = os.environ.get("MODEL", "Qwen3.8-Flash-Next-UD-IQ4_XS-explore")
 GGUF_PATH = os.environ.get(
     "GGUF_PATH",
-    "/mnt/models/Qwen3.8-Flash-Next-UD-IQ4_XS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+    "/mnt/data/models/Qwen3.8-Flash-Next-UD-IQ4_XS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
 )
 PORT = int(os.environ.get("EXPLORER_PORT", "8350"))
 HOST = os.environ.get("EXPLORER_HOST", "0.0.0.0")

@@ -65,7 +65,7 @@ expected `16.0 GT/s x8` or `x16`.
 ## 3. SSD throughput (about 3 minutes)
 
 ```sh
-~/llama-swap/bench/disk.sh /home/jim /mnt/models
+~/llama-swap/bench/disk.sh /home/jim /mnt/data/models
 ```
 
 This runs fio with O_DIRECT on a temporary 4 GiB file per drive:
@@ -73,7 +73,7 @@ This runs fio with O_DIRECT on a temporary 4 GiB file per drive:
 - random 4K read at queue depth 32 × 4 jobs;
 - random 4K read at queue depth 1.
 
-`/home` is the WD SN7100 (btrfs). `/mnt/models` is the KIOXIA EXCERIA BASIC (xfs).
+`/home` is the WD SN7100 (btrfs). `/mnt/data/models` is the KIOXIA EXCERIA BASIC (xfs).
 Both are on chipset Gen4 x4 links today. If they move to CPU-attached M.2 slots, note
 it.
 
@@ -141,7 +141,7 @@ Before each model the script unloads every other running model except the voice 
 some llama-swap groups don't evict: on the first DF2 attempt, gemma-4-26B was still on
 the MSI card and DF2 ran out of memory.
 
-Q3.8-27B-IQ4XS-DF2 needs its draft at `/mnt/shared/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf`.
+Q3.8-27B-IQ4XS-DF2 needs its draft at `/mnt/data/models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf`.
 This is the Q4_K_M from `incoai/Qwen3.8-27B-DFlash2-GGUF`, sha256
 `1a25c56858e1ebe93f2718ac1d49d1151f9323325c1bbfd6209370f4db131ebd`.
 

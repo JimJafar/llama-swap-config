@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 log = logging.getLogger("npu-asr")
 
-MODEL_DIR_DEFAULT = "/mnt/shared/models/distil-medium.en-npu"
+MODEL_DIR_DEFAULT = "/mnt/data/models/distil-medium.en-npu"
 # The static pipeline is the ONLY whisper path that works on the NPU (dynamic fails
 # with unordered_map::at). NPUW_* offloads unsupported ops to CPU. See npu/README.md.
 STATIC_CFG = {

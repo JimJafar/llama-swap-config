@@ -148,7 +148,7 @@ def _gpt2_pretokenize(text: str):
 
 
 if __name__ == "__main__":
-    bpe = ByteLevelBPE("/mnt/models/Qwen3.8-Flash-Next-UD-IQ4_XS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf")
+    bpe = ByteLevelBPE("/mnt/data/models/Qwen3.8-Flash-Next-UD-IQ4_XS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf")
     import sys
     for phrase in sys.argv[1:] or ["The cat sat on the", "hello world", "attention is all you need"]:
         ids = bpe.encode(phrase)

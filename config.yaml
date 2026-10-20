@@ -105,7 +105,7 @@ hooks:
 # The fixed template comes from here: https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates/blob/main/README.md
 #
 # All Qwen 3.5, 3.6 and 3.8 variants should have `--jinja --chat-template-file /models/froggeric_qwen_35_36_38_chat_template.jinja`
-# (llama.cpp). The .jinja file must live in the MOUNTED models dir (/mnt/shared/models on the host,
+# (llama.cpp). The .jinja file must live in the MOUNTED models dir (/mnt/data/models on the host,
 # which is bind-mounted to /models in every container) -- a host-side repo path is invisible inside
 # the container. For the vLLM entry the flag is `--chat-template <path>` instead (no --jinja).
 #
@@ -215,7 +215,7 @@ models:
     cmd: |
       docker run --rm --name q9b-cgroom --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       # known-good image build: b9692
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
@@ -260,7 +260,7 @@ models:
     cmd: |
       docker run --rm --name q9b-charvest --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       # known-good image build: b9692
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-9B-UD-Q4_K_XL.gguf
@@ -301,8 +301,8 @@ models:
     cmdStop: docker stop q9b-charvest
 
     # Qwen3.8-Flash-Next UD-IQ4_XS (added 2026-08-26): 180B total / 6B active, with
-    # 51B n-gram embeddings. The three GGUF shards live on /mnt/models (not the usual
-    # /mnt/shared/models). Uses official llama.cpp mainline (server-cuda13) with --fit to
+    # 51B n-gram embeddings. The three GGUF shards live on /mnt/data/models (not the usual
+    # /mnt/data/models). Uses official llama.cpp mainline (server-cuda13) with --fit to
     # place the active MoE layers across all three GPUs; the large embedding table and
     # context KV stay host-memory/mmap-backed, so context scales to ~196K (verified
     # 2026-08-28). Do not preload this model alongside the resident models.
@@ -316,7 +316,7 @@ models:
     cmd: |
       docker run --rm --name qwen38-flash-next --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
-      -p ${PORT}:8080 -v /mnt/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
       --fit on
@@ -385,7 +385,7 @@ models:
     cmd: |
       docker run --rm --name qwen38-flash-next-explore --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
-      -p ${PORT}:8080 -v /mnt/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
       --fit on
@@ -445,7 +445,7 @@ models:
     # official Strata 0.1.43 (since 2026-10-12; the marvin-tuned fork before): engine
     # config strata/strata-iq3_s.json, measurements in strata/README.md
     # (--resident-budget-gib 30 -> 27.8 GiB pinned, ~16 GiB RAM left available;
-    # --vram-reserve-mib 957, as the engine asked). Files in /mnt/shared/models/
+    # --vram-reserve-mib 957, as the engine asked). Files in /mnt/data/models/
     # Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S; shard 2 (the PLE/engram table) is the same file
     # (same SHA-256) for every size; it was a symlink to the IQ3_XXS copy until that went.
     # PERSISTENT SINCE 2026-10-03: non-persistent, it was evicted by EVERY dictation
@@ -489,7 +489,7 @@ models:
     # deleted. History of the fork and its measurements: git log for this file.
     #
     # MTP DRAFT FILE: mainline needs ggml-org's MTP GGUF (ggml-org/Qwen3.8-Flash-Next-GGUF,
-    # mtp-Qwen3.8-Flash-Next-Q4_0.gguf, 2.2 GB, in /mnt/shared/models). The unsloth
+    # mtp-Qwen3.8-Flash-Next-Q4_0.gguf, 2.2 GB, in /mnt/data/models). The unsloth
     # mtp-...-Q4_K_M.gguf the fork used lacks the `qwen4exp.attention.recurrent_layers`
     # key: mainline then aborts at load with GGML_ASSERT(buffer) in
     # llama_kv_cache::set_input_k_idxs (k-pool). That file was deleted.
@@ -506,7 +506,7 @@ models:
     cmd: |
       docker run --rm --name qwen38-flash-next-mtp --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
-      -p ${PORT}:8080 -v /mnt/models:/models -v /mnt/shared/models:/shared
+      -p ${PORT}:8080 -v /mnt/data/models:/models -v /mnt/data/models:/shared
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/AtomicChat-Qwen3.8-Flash-Next-IQ4/Qwen3.8-Flash-Next-AD-3.84bpw-IQ4_XS-M64-00001-of-00028.gguf
       -md /shared/mtp-Qwen3.8-Flash-Next-Q4_0-ggml-org.gguf
@@ -558,7 +558,7 @@ models:
     # difference between the 196,608 VRAM ceiling and the native 262,144 cap
     # (KV 13.69 GB, ~5.5 GB expected spare). NOTE: shard 2 is a single >4 GiB tensor, so
     # --lazy-mode auto already applies; it is set explicitly to match ISA's guidance.
-    # First load from /mnt/shared/models is mmap-backed, so expect a slow cold start.
+    # First load from /mnt/data/models is mmap-backed, so expect a slow cold start.
   Q3.8-FN-GSQ-RCO-Q2_0:
     # 2026-09-18: unlisted at Jim's request. Its MTP variant (Q3.8-FN-GSQ-RCO-Q2_0-MTP) was
     # deleted 2026-10-06; the model file is gone too. Config kept for A/B reference.
@@ -566,7 +566,7 @@ models:
     cmd: |
       docker run --rm --name qwen38-flash-q20 --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.8-Flash-Next-GSQ-RCO-Q2/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf
       --fit on
@@ -675,7 +675,7 @@ models:
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.8-27B-UD-Q6_K_M.gguf
       --mmproj /models/qwen3.8-mmproj-BF16.gguf
@@ -774,7 +774,7 @@ models:
   #     the difference between ~537 MiB and ~939 MiB free -- a materially safer margin.
   # Head-carrying MTP costs ZERO extra VRAM: the 4 nextn tensors are already inside the model
   # file, so this needs no second file and no second bind mount.
-  # To re-enable the separate draft, restore the -md line AND `-v /mnt/shared/models:/shared`.
+  # To re-enable the separate draft, restore the -md line AND `-v /mnt/data/models:/shared`.
   #
   # DELIBERATE OMISSIONS vs the 27B entries:
   #   --mmproj          : the model card lists "Input support: text". The Qwen3.8 vision
@@ -795,7 +795,7 @@ models:
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
-      -p ${PORT}:8080 -v /mnt/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Altworld_Hemmingway-1-Q4_K_M.gguf
 
@@ -895,14 +895,14 @@ models:
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       # official mainline image: MTP is in mainline since 2026-09-07 and is
       # ~18% faster there than on the old mostlygeek bundled build.
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Swift-1.5-Qwen3.8-27B-Q6_K_S.gguf
 
       # fixed chat template (shared with the other Qwen3.8 entries; the file
-      # already sits in /mnt/shared/models, so no second mount). A/B: this GGUF
+      # already sits in /mnt/data/models, so no second mount). A/B: this GGUF
       # ships its OWN template which also handles reasoning_effort and
       # preserve_thinking, so if reasoning tags misparse on this fine-tune,
       # drop both template flags and let the embedded one run.
@@ -999,7 +999,7 @@ models:
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       # 2026-09-07: MTP is now in mainline; moved off the mostlygeek bundled image (where MTP
       # was first available) onto the official ggml-org main image. Per repo policy we do NOT
       # pin builds - this tracks the latest mainline CUDA13 tag (docker pull to advance).
@@ -1125,7 +1125,7 @@ models:
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
       -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
       -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.8-27B-UD-IQ4_XS.gguf
       -md /models/Qwen3.8-27B-DFlash2-Q4_K_M.gguf
@@ -1183,7 +1183,7 @@ models:
     # companion DFlash (not DSpark); both companions can run together.
     #
     # RUNTIME: Muse Glimmer requires llama.cpp b10353+ (the rolling server-cuda13 image).
-    # FILES live in /mnt/shared/models/muse-glimmer (the mount was still /mnt/models, so the
+    # FILES live in /mnt/data/models/muse-glimmer (the mount was still /mnt/data/models, so the
     # entry could not load, until 2026-10-06).
     # MEASURED 2026-10-06 (b11434, 2 reps, temp 0, through llama-swap, DFlash on):
     #   short prompt, 2K-token answer: decode 69 t/s (drafts ~77% accepted)
@@ -1209,7 +1209,7 @@ models:
     cmd: |
       docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server
       ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
@@ -1256,7 +1256,7 @@ models:
     cmd: |
       docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/gemma-4/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4/gemma-4-31B-it-qat-assistant-MTP-Q8_0.gguf
@@ -1307,7 +1307,7 @@ models:
     cmd: |
       docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/gemma-4/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
       -md /models/gemma-4/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
@@ -1344,7 +1344,7 @@ models:
     cmd: |
       docker run --rm --name ge4bmtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/gemma-4/gemma-4-E4B-it-UD-Q4_K_XL.gguf
       -md /models/gemma-4/mtp-gemma-4-E4B-it-BF16.gguf
@@ -1396,7 +1396,7 @@ models:
     cmd: |
       docker run --rm --name bge --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/bge-m3-FP16.gguf
       --embeddings
@@ -1425,7 +1425,7 @@ models:
     #  - LOCAL PATH + HF_HUB_OFFLINE=1: point at the pre-downloaded dir, NOT the HF id.
     #    With the HF id, vLLM makes unauthenticated HF Hub calls at load that get
     #    rate-limited and HANG forever (model loads to VRAM then sits at 0% util). The
-    #    model was snapshot_download'd to /mnt/shared/models/Qwen3-Embedding-4B.
+    #    model was snapshot_download'd to /mnt/data/models/Qwen3-Embedding-4B.
     #  - Pinned to one card (device 0). Embedding needs no TP; llama-swap serves one
     #    model at a time so it has the GPU to itself. Query the OpenAI /v1/embeddings
     #    endpoint with model=qwen3-embedding-4b. NB Qwen3-Embedding wants an instruction
@@ -1437,7 +1437,7 @@ models:
       -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1
       -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=0
       -e VLLM_NO_USAGE_STATS=1
-      -p ${PORT}:8000 -v /mnt/shared/models:/models
+      -p ${PORT}:8000 -v /mnt/data/models:/models
       vllm/vllm-openai:latest
       --model /models/Qwen3-Embedding-4B
       --runner pooling
@@ -1482,7 +1482,7 @@ models:
     cmd: |
       # SIGTERM on unload is clean (uvicorn shuts down); no cmdStop needed.
       /home/jim/lab/npu-env/bin/python /home/jim/llama-swap/npu/asr_server.py --port 5823
-      --model-dir /mnt/shared/models/distil-medium.en-npu
+      --model-dir /mnt/data/models/distil-medium.en-npu
     # FIXED PORT 5823 (2026-10-13): alexa-marvin's Wyoming bridge on Colin calls
     # http://100.86.157.12:5823 directly (the server binds 0.0.0.0), so it cannot
     # take whatever port llama-swap hands out.
@@ -1508,7 +1508,7 @@ models:
     # Candidate replacement for whisper-npu-asr (the NPU goes with the Core Ultra CPU) and a
     # meeting transcriber: one pass gives text, segment timestamps and speaker labels (S1, S2...).
     # English + Chinese only. Not streaming. Apache-2.0.
-    #   Model:   /mnt/shared/models/moss-transcribe-diarize/MOSS-Transcribe-Diarize-Q8_0.gguf
+    #   Model:   /mnt/data/models/moss-transcribe-diarize/MOSS-Transcribe-Diarize-Q8_0.gguf
     #            (987 MB, SHA-256 2f9039f1..., from handy-computer/moss-transcribe-diarize-gguf;
     #            Q8_0 = 1.93% WER on LibriSpeech test-clean; Q4_K_M has tail failures, avoid)
     #   Runtime: transcribe.cpp (github.com/handy-computer/transcribe.cpp, built 2026-10-18 at
@@ -1543,13 +1543,13 @@ models:
     #   cmd: |
     #     /home/jim/lab/transcribe-env/bin/python /home/jim/llama-swap/moss/moss_server.py
     #     --port ${PORT}
-    #     --model /mnt/shared/models/moss-transcribe-diarize/MOSS-Transcribe-Diarize-Q8_0.gguf
+    #     --model /mnt/data/models/moss-transcribe-diarize/MOSS-Transcribe-Diarize-Q8_0.gguf
     #
     # Then point the Diction gateway on Colin at it (CUSTOM_BACKEND_MODEL=moss-asr in
     # ~/code/diction-gateway on Colin) and, if wanted, baruch-server.
 
     # (gemma-clean-e4b / gemma-clean-e2b removed 2026-07-26: superseded by qwen-clean-2b,
-    #  which matches their quality ~40x faster. GGUFs deleted from /mnt/shared/models.)
+    #  which matches their quality ~40x faster. GGUFs deleted from /mnt/data/models.)
 
     # --- CLEANUP C: Qwen3.5-2B instruct, thinking OFF -- fast cleanup (added 2026-07-26) --
     # ~134ms/cleanup at ~90 tok/s; matches gemma-clean-e4b quality on the four dictation
@@ -1564,7 +1564,7 @@ models:
     cmd: |
       docker run --rm --name qclean-2b --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       # known-good image build: b9692
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-2B-UD-Q4_K_XL.gguf
@@ -1614,7 +1614,7 @@ models:
     cmd: |
       docker run --rm --name s1mini --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/s1-mini-q4_k_m.gguf
       # S1 contract: built-in Qwen3 template via --jinja with thinking OFF
@@ -1675,7 +1675,7 @@ models:
     cmd: |
       docker run --rm --name qwen354b --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/Qwen3.5-4B-MTP-Q5_K_M.gguf
       --spec-type draft-mtp
@@ -1701,7 +1701,7 @@ models:
     cmd: |
       docker run --rm --name h2olightning --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/shared/models:/models
+      -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/h2o-lightning-4b.Q4_K_M.gguf
       --jinja

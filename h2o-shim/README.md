@@ -14,7 +14,7 @@ client --POST /v1/systemone--> h2o-shim (pm2, :8741)
 | `h2o_lightning_shim.py`, `serve_config.json` | H2O's files, **unmodified**, from `h2oai/h2o-lightning-4b` tag v1.2.2 (identical on main at 09d3d56, 2026-10-09). Licence Apache-2.0. sha256 c899c93d1b51f46d… / a423fd6b973334bd… |
 | `llama_backend.py` | Replaces the shim's vLLM client with llama-server calls, then serves the shim as shipped |
 | pm2 app | `h2o-shim`: `python3 llama_backend.py --host 0.0.0.0 --port 8741` (stdlib only, no venv) |
-| Model | `/mnt/shared/models/h2o-lightning-4b.Q4_K_M.gguf` (mradermacher static quant, sha256 a2856d3e…). It loads on first use and then stays: it's in llama-swap's persistent "resident" group |
+| Model | `/mnt/data/models/h2o-lightning-4b.Q4_K_M.gguf` (mradermacher static quant, sha256 a2856d3e…). It loads on first use and then stays: it's in llama-swap's persistent "resident" group |
 
 ## API
 

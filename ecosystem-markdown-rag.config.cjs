@@ -17,7 +17,7 @@ module.exports = {
 				CUDA_VISIBLE_DEVICES: "GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a",
 				CUDA_PATH: "/opt/cuda",
 				NVCC_CCBIN: "/usr/bin/g++-15",
-				HF_HOME: "/mnt/shared/models",
+				HF_HOME: "/mnt/data/models",
 				PYTHONUNBUFFERED: "1",
 				OLLAMA_FLASH_ATTENTION: "1",
 				OLLAMA_KV_CACHE_TYPE: "q8_0",

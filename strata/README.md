@@ -48,7 +48,7 @@ Older results (fork era, 0.1.37 and 0.1.40, IQ3_XXS) are in `ab/results/` and `a
 ```sh
 cd ~/lab/Strata
 git pull --ff-only
-./setup.sh --family qwen --model IQ3_S --gguf-dir /mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S \
+./setup.sh --family qwen --model IQ3_S --gguf-dir /mnt/data/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S \
     --context 262144 --kv int8 --vision no --gpus 2,1 --layer-split auto --yes --no-start
 ```
 

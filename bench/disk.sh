@@ -1,6 +1,6 @@
 #!/bin/sh
 # SSD throughput with fio, O_DIRECT (no page cache), ~80 s per drive.
-# Usage: bench/disk.sh DIR [DIR...]   e.g. bench/disk.sh /home/jim /mnt/models
+# Usage: bench/disk.sh DIR [DIR...]   e.g. bench/disk.sh /home/jim /mnt/data/models
 # Each DIR gets a temporary 4 GiB test file, deleted afterwards.
 set -eu
 for dir in "$@"; do

@@ -95,18 +95,18 @@ uv pip install --python npu-env/bin/python \
 export HF_HOME=$HOME/.cache/huggingface
 npu-env/bin/optimum-cli export openvino --trust-remote-code \
   --model distil-whisper/distil-medium.en --weight-format int8 \
-  /mnt/shared/models/distil-medium.en-npu
+  /mnt/data/models/distil-medium.en-npu
 # one-line graph surgery on the decoder (REQUIRED for the static NPU pipeline):
 npu-env/bin/python npu/patch_decoder.py \
-  /mnt/shared/models/distil-medium.en-npu/openvino_decoder_model.xml \
-  /mnt/shared/models/distil-medium.en-npu/openvino_decoder_model_patched.xml
+  /mnt/data/models/distil-medium.en-npu/openvino_decoder_model.xml \
+  /mnt/data/models/distil-medium.en-npu/openvino_decoder_model_patched.xml
 # (then move patched over original)
 LD_LIBRARY_PATH=<openvino/libs> npu-env/bin/python npu/bench_whisper.py \
-  /mnt/shared/models/distil-medium.en-npu
+  /mnt/data/models/distil-medium.en-npu
 ```
 
 Intel's own pre-converted models (`OpenVINO/whisper-base-int8-ov` etc., no patching
-needed) live in `/mnt/shared/models/`; the `OpenVINO/` HF org also publishes
+needed) live in `/mnt/data/models/`; the `OpenVINO/` HF org also publishes
 whisper-medium/large and distil-whisper-large int4/int8 variants.
 
 ## Integration status (DONE 2026-08-04)

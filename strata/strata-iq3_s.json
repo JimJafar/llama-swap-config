@@ -4,9 +4,9 @@
   "--pack",
   "/home/jim/lab/Strata-data/packs/iq3_s",
   "--native",
-  "/mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+  "/mnt/data/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
   "--ple-gguf",
-  "/mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00002-of-00002.gguf",
+  "/mnt/data/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00002-of-00002.gguf",
   "--expert-profile",
   "/home/jim/lab/Strata/data/expert-profile.bin",
   "--expert-cache",
@@ -57,8 +57,8 @@
  ],
  "vision": {
   "exe": "/home/jim/lab/Strata/engine/strata-vision",
-  "mmproj": "/mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
-  "model": "/mnt/shared/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+  "mmproj": "/mnt/data/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+  "model": "/mnt/data/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
   "gpu": false,
   "max_tokens": 768,
   "threads": 8

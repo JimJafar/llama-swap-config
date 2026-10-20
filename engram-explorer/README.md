@@ -49,7 +49,7 @@ Env vars (defaults shown):
 - `LLAMA_SWAP_URL=http://127.0.0.1:8033` — llama-swap (used only to wake/load the model)
 - `DIRECT_URL=http://127.0.0.1:5804` — the explore llama-server (for /tokenize + /completion)
 - `MODEL=Qwen3.8-Flash-Next-UD-IQ4_XS-explore`
-- `GGUF_PATH=/mnt/models/.../00001-of-00003.gguf`
+- `GGUF_PATH=/mnt/data/models/.../00001-of-00003.gguf`
 - `EXPLORER_PORT=8350`
 
 The model is lazy-loaded (cold start ~45 s on first request), then stays warm at ~180 ms per
