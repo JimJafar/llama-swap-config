@@ -74,6 +74,12 @@ Expected after the upgrade: about 13–14 GB/s on the 5060 Tis and about 25 GB/s
 The WD's weaker write and random results are probably btrfs (checksums and
 copy-on-write under O_DIRECT) more than the drive itself.
 
+**Since 2026-10-20 the KIOXIA is one xfs filesystem at `/mnt/data`** (932 GB). Windows
+was removed, and the old `/mnt/models` and `/mnt/shared` partitions were merged into it:
+models are in `/mnt/data/models`, everything else from `/mnt/shared` sits directly under
+`/mnt/data`. The tables above were measured on the old `/mnt/models` partition of the same
+drive. To repeat the disk test, use `bench/disk.sh /home/jim /mnt/data`.
+
 ## Images (ComfyUI, `bench/image_bench.py`)
 
 Time is ComfyUI's own execution time per image. The first image of each model is cold:
