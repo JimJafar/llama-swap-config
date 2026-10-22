@@ -1100,9 +1100,9 @@ models:
     # build). NO --swa-full -- gemma's iSWA would OOM with it (dual KV cache). The dense
     # gemma-4-31B-Q4-MTP above stays for higher coding quality; this is the speed pick.
     #
-    # PLACEMENT (ZOTAC-only, single-GPU): pinned by UUID to the ZOTAC 5060 Ti (af5bd53f).
-    # NO tensor-split / no --fit. --n-cpu-moe keeps as many MoE expert layers in the ZOTAC's
-    # VRAM as fit beside the resident dictation (qwen-clean-2b, ~1.7 GB); the rest offload to
+    # PLACEMENT (single GPU): pinned by UUID to the MSI 5060 Ti (57bbb375; this comment
+    # said ZOTAC until 2026-10-20). NO tensor-split / no --fit. --n-cpu-moe keeps as many MoE
+    # expert layers in VRAM as fit beside the 256K KV cache; the rest offload to
     # RAM (64 GB host, evictable). 16 = safe "max-on-GPU w/o evicting dictation" estimate --
     # lower toward 14-15 for more on GPU if stable; raise to 18-20 (or -ub 512->256) if it
     # OOMs or pushes dictation.
@@ -1142,6 +1142,45 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop g26moe
+
+    # gemma-26b-fast (2026-10-20): the same model and MTP draft, tuned for short prompts.
+    # -c 32768 instead of 256000 frees the KV cache, so more expert layers fit on the card
+    # and every expert layer fits on the card (--n-cpu-moe 0: 15.2 of 16.3 GB). Same card as
+    # above (GPU-57bbb375, the MSI 5060 Ti), so the two swap in the "gemma-26b" group.
+    # Measured 2026-10-20, three ~25-token prompts -> 600 tokens:
+    #   --n-cpu-moe 16, -c 256000 (the entry above): decode 38-45 t/s, prefill 57-88 t/s
+    #   --n-cpu-moe 4: 84-98 t/s | 2: 101-117 t/s | 0: 136-161 t/s decode, 150-482 t/s prefill
+    # Raise to 2 only if it OOMs (e.g. with ComfyUI loaded on the MSI card).
+  gemma-26b-fast:
+    cmd: |
+      docker run --rm --name g26fast --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/data/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/gemma-4/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      -md /models/gemma-4/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
+      --jinja --chat-template-file /models/gemma-4/gemma-4-chat_template.jinja
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      -ngl 99
+      --n-cpu-moe 0
+      -ngld 99
+      -c 32768
+      -np 1
+      -fa on
+      --load-mode mlock
+      -b 2048
+      -ub 512
+      -ctk q8_0
+      -ctv q8_0
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --timeout 900
+      --no-context-shift
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop g26fast
 
   gemma-4-E4B-MTP:
     cmd: |
@@ -1585,6 +1624,15 @@ models:
     #   (vLLM TP + the -sm tensor TP entry, pinned to idx 1,2) coexist with it fine.   #
     # ############################################################################## #
 groups:
+  "gemma-26b":
+    swap: true
+    exclusive: false
+    persistent: false
+    # Both gemma-26B entries use the MSI 5060 Ti (GPU-57bbb375), so loading one unloads
+    # the other, and neither evicts anything else.
+    members:
+      - gemma-4-26B-MoE-MTP
+      - gemma-26b-fast
   "gemma-ondemand":
     swap: true
     exclusive: false

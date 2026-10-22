@@ -166,6 +166,49 @@ Why it's slow:
   RAM, so the disk waits go away. That is most of the per-token time today. Compare the
   engine's `glm stat` lines in `~/lab/project-maya/maya-maya-l.log`.
 
+## DeepSeek-V4.1-Flash-1017 in Project Maya (measured 2026-10-21)
+
+Measured twelve days after the rest, so not part of the 2026-10-09 baseline. Run it again
+after the upgrade the same way.
+
+- **Engine:** Project Maya v1.1.20 (`~/lab/project-maya`, commit `35bb2b2`), its DeepSeek
+  engine `build/maya-ds4`. It keeps the experts in VRAM, reads the rest from the model
+  files (page cache, then the NVMe), and runs some of them on the CPU.
+- **Model:** Maya-S (experts IQ2_XXS / IQ3_XXS, dense weights Q8_0, Engram tables Q6_K;
+  339.5 GB: 178 GB of weights + 161 GB of Engram tables) in
+  `/mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF/Maya-S`, 32K context, thinking "high".
+  The DSpark drafter is used.
+- **Placement:** all four GPUs, the auto layer split: 0–7 and 42 on the MSI, 8–19 on the
+  3090, 20–30 on the 5070 Ti, 31–39 and the head on the ZOTAC. The cards hold 4,213 of
+  15,744 experts (49 GB); the other ~127 GB are read from the files, with 40 GB of the
+  most-routed read ahead into RAM.
+- **Conditions:** everything in llama-swap was unloaded first, the voice stack too, and
+  ComfyUI was freed. The run started with empty caches, as the GLM run did.
+
+To repeat it:
+
+1. Unload everything: `curl -X POST localhost:8033/api/models/unload`.
+2. Start Maya: `~/lab/project-maya/run-maya-ds4.sh`.
+3. Run the benchmark:
+   `bench/llm_bench.py deepseek-v4.1-flash --base http://127.0.0.1:8080 --no-unload --out bench/results/llm-maya-ds4.jsonl`.
+
+| | Load | Short prompt → 2048 tok: decode (draft accept) | 29K prompt: prefill / time to first token | 29K prompt: decode (draft accept) |
+|---|---|---|---|---|
+| Maya-S, 4 GPUs | ~45 s (engine start) | **9.3** (71%) | **320** / 91.2 s | **6.8** (67%) |
+
+Why it's slow:
+- **Most of the model isn't in fast memory.** VRAM holds 49 GB of the 178 GB of weights,
+  and RAM only had ~49 GB free for the rest, so many experts come off the KIOXIA each
+  token. The CPU ran 20% of the experts during the 2048-token answer.
+- **The PCIe link doesn't help yet.** At start the engine measured streaming disk experts
+  to the GPUs against running them on the CPU, and the CPU was 2–4× faster on every card,
+  so it streams none.
+- **Expected after the upgrade:** with 256 GB of RAM all 178 GB of weights fit in VRAM
+  plus RAM, leaving only the Engram rows on the NVMe. A T5810 with 256 GB of quad-channel
+  DDR4 and two 3060s is reported at ~11 tok/s; the EPYC's 8 channels and the 72 GB of VRAM
+  should do clearly better. Compare the engine's lines in
+  `~/lab/project-maya/maya-ds4.log`.
+
 ## What to watch after the upgrade
 
 - **Prefill on the split models** (Q3.8-27B tensor-parallel, muse, gemma). These move
