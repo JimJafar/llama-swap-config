@@ -1182,6 +1182,40 @@ models:
       --port 8080
     cmdStop: docker stop g26fast
 
+    # Flint (2026-10-22): RecursiveSI's coding-agent MoE, 39.8B total / ~2.5B active, 256 experts,
+    # 262K context (mostly 513-token sliding window), text only. unsloth/flint-GGUF UD-Q4_K_XL (25.1 GB,
+    # rev 20468edf). The "flint" arch landed in llama.cpp on 2026-10-21 (PR #30928), after the
+    # server-cuda13 image the other entries use, so this entry runs its own pinned image:
+    # llama-cpp-flint:latest = ghcr.io/ggml-org/llama.cpp@sha256:dfe42bda... (build 11804).
+    # MSI 5060 Ti (GPU-57bbb375), in the "gemma-26b" swap group. It doesn't fit the card:
+    # --n-cpu-moe 23 keeps 23 of the 47 MoE layers' experts in RAM (mmap, not mlock: RAM is tight
+    # beside Strata). Measured 2026-10-22, two short prompts -> 800 tokens:
+    #   n-cpu-moe 24, 64K: 40-45 t/s, 14.9 GB | 23, 64K: 36-49 t/s, 15.4 GB | 22, 64K: 44-51 t/s, 15.8 GB
+    #   n-cpu-moe 20 or lower: out of memory. Sampling: the model card's (temp 1.0, top-p 0.95, top-k 20).
+  flint:
+    cmd: |
+      docker run --rm --name flint --runtime nvidia --cap-add SYS_ADMIN
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      -p ${PORT}:8080 -v /mnt/data/models:/models
+      --entrypoint /app/llama-server llama-cpp-flint:latest
+      -m /models/flint/flint-UD-Q4_K_XL.gguf
+      --jinja
+      -ngl 99
+      --n-cpu-moe 23
+      -c 65536
+      -np 1
+      -fa on
+      -b 2048
+      -ub 512
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop flint
+
   gemma-4-E4B-MTP:
     cmd: |
       docker run --rm --name ge4bmtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
@@ -1628,11 +1662,12 @@ groups:
     swap: true
     exclusive: false
     persistent: false
-    # Both gemma-26B entries use the MSI 5060 Ti (GPU-57bbb375), so loading one unloads
-    # the other, and neither evicts anything else.
+    # Every member uses the MSI 5060 Ti (GPU-57bbb375), so loading one unloads the
+    # others, and none evicts anything else. (Flint joined 2026-10-22.)
     members:
       - gemma-4-26B-MoE-MTP
       - gemma-26b-fast
+      - flint
   "gemma-ondemand":
     swap: true
     exclusive: false
