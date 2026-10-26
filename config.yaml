@@ -1108,7 +1108,7 @@ models:
     # OOMs or pushes dictation.
   gemma-4-26B-MoE-MTP:
     cmd: |
-      docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      /home/jim/llama-swap/strata/yield-strata.sh docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
@@ -1153,7 +1153,7 @@ models:
     # Raise to 2 only if it OOMs (e.g. with ComfyUI loaded on the MSI card).
   gemma-26b-fast:
     cmd: |
-      docker run --rm --name g26fast --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      /home/jim/llama-swap/strata/yield-strata.sh docker run --rm --name g26fast --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
@@ -1194,7 +1194,7 @@ models:
     #   n-cpu-moe 20 or lower: out of memory. Sampling: the model card's (temp 1.0, top-p 0.95, top-k 20).
   flint:
     cmd: |
-      docker run --rm --name flint --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/yield-strata.sh docker run --rm --name flint --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server llama-cpp-flint:latest
@@ -1663,7 +1663,11 @@ groups:
     exclusive: false
     persistent: false
     # Every member uses the MSI 5060 Ti (GPU-57bbb375), so loading one unloads the
-    # others, and none evicts anything else. (Flint joined 2026-10-22.)
+    # others. (Flint joined 2026-10-22.)
+    # Each member also puts a lot in system RAM, so since 2026-10-26 its cmd starts with
+    # strata/yield-strata.sh, which unloads Strata first: beside Strata they ran Marvin out
+    # of RAM (hard freeze, 2026-10-25). The next Strata request evicts them again (its group
+    # is exclusive and this one isn't persistent).
     members:
       - gemma-4-26B-MoE-MTP
       - gemma-26b-fast

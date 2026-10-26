@@ -219,3 +219,43 @@ Why it's slow:
   5.5 GHz. Watch the 1-thread RAM number and anything bound by the CPU.
 - **The whisper-npu-asr model will not run.** The NPU belongs to the Core Ultra CPU,
   so speech-to-text needs a new home: parakeet-asr on a GPU, or whisper on the CPU.
+
+## Tuning DeepSeek-V4.1-Flash after the upgrade
+
+Notes from a post (saved 2026-10-26) that tuned Strata v0.2.6 for DeepSeek-V4.1-Flash-1017
+IQ1_M on one L40S 48 GB, two EPYC 9754 and ~1 TB of RAM. Against stock Strata, prefill went
+from 1,147 to 1,975 tok/s at a 510K prompt (842 → 1,025 at 10K), and decode from 26–36 to
+69–77 tok/s. An AI agent made the changes overnight as a local build; the patches aren't
+published, and the machine holds every expert in RAM, so the numbers don't carry over.
+
+What applies here:
+
+- **BIOS: NPS1.** Their first gain was keeping CPU expert threads and expert memory on one
+  NUMA node. The 7443P is one socket, so this only matters if the BIOS splits it into NUMA
+  zones (NPS2/NPS4). Set NPS1, or pin the engine to one node if a split is kept.
+- **Prefill chunk size.** They used 16,384-token chunks (Strata's DSpark run used 8,192).
+  Maya already grows its chunks to 16K or 32K where VRAM allows; check what it picks in
+  `~/lab/project-maya/maya-ds4.log`.
+- **Drafting.** They set DSpark's confidence threshold to 0.15 (aggressive) and cut the
+  draft model's GPU expert slots from 384 to 192 to give the target model more. Judge by
+  total time per output token, and check answer quality, not only speed: they report
+  floating-point differences from the larger chunks.
+- **Engine tuning.** Run Maya's own `--calibrate` (CPU lane, PCIe share, disk reads) and
+  `--speed-calibration` (drafter on or off) once the RAM is in, before benchmarking.
+- **Engine changes worth watching for upstream** (in Strata or Maya): reusing idle prefill
+  scratch VRAM for extra decode experts (~3.7 GB, ~500 experts in their case), a cache of
+  reconstructed FP16 weights for prefill (384 MiB), and running each CPU expert's
+  gate/up → quantize → down chain as soon as its inputs are ready.
+- **The method.** The real lesson is to give an agent the engine source and a benchmark
+  harness and let it optimise overnight. With 256 GB in place, the same could be done for
+  Maya or Strata on this exact machine, using `bench/llm_bench.py` and the agent benchmark
+  (`bench/agent/`) to check speed and quality.
+
+Also compare quants once the RAM is in: Maya-S (current, 339.5 GB) against ISTA-DASLab's
+GSQ-RCO IQ2_XXS (249 GB, run by Strata 0.2.4's `strata-dsv41` engine). Keep whichever
+does better on the same tests; there was no direct comparison as of 2026-10-24.
+
+**After the upgrade, revisit `strata/yield-strata.sh`.** Since 2026-10-26, Flint and the
+gemma-26B entries unload Strata before they start, because beside Strata they ran the
+62 GB machine out of RAM (hard freeze on 2026-10-25). With 256 GB they can run side by
+side, so drop the wrapper from their `cmd` lines.
