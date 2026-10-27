@@ -214,7 +214,11 @@ Why it's slow:
 - **Prefill on the split models** (Q3.8-27B tensor-parallel, muse, gemma). These move
   data between cards over PCIe, so they should gain the most from x8 → x16.
 - **Strata.** Experts stream from RAM over PCIe. It should gain from both the wider
-  links and the RAM: 256 GB means the whole expert set can be pinned.
+  links and the RAM: 256 GB means the whole expert set can be pinned. Note the version:
+  the baseline above is 0.1.41, but Strata was updated to **0.2.7** on 2026-10-27, which
+  decodes ~10% slower on this machine (code 143 → 126 tok/s; prompts level). Compare
+  post-upgrade runs against the 0.2.7 figures in `strata/README.md`, not only the 0.1.41
+  row, so the upgrade isn't blamed for the version change.
 - **Single-thread speed.** It drops: Zen 3 at 4.0 GHz against Arrow Lake at
   5.5 GHz. Watch the 1-thread RAM number and anything bound by the CPU.
 - **The whisper-npu-asr model will not run.** The NPU belongs to the Core Ultra CPU,

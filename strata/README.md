@@ -41,6 +41,17 @@ Unchanged from setup, because sweeps confirmed them: `--spec 4 --spec-min-p 0.5`
 
 0.1.43 with the tuned config matches the fork on 0.1.41 (prompts 0-4% faster, decode within run-to-run noise), so dropping the fork cost nothing. Setup's 13 workers come out level with 8 (decode 1-4% higher, within noise), so the config keeps 8 and leaves the CPU more headroom.
 
+**0.2.7 (2026-10-27), same tuned config, same day as a fresh 0.1.43 run:**
+
+| | 0.1.43 | 0.2.7 | 0.2.7, run 2 | 0.2.7, 13 workers |
+|---|---|---|---|---|
+| 1K / 4K prompt | 449 / 1439 | 435 / 1391 | 439 / 1467 | 422 / 1380 |
+| 16K / 32K prompt | 2443 / 3072 | 2495 / 3156 | 2582 / 3171 | 2499 / 3140 |
+| decode: code / prose / explain | 143 / 108 / 119 | 125 / 102 / 111 | 126 / 101 / 108 | 127 / 102 / 108 |
+| agent: prompt / decode | 2274 / 116 | 2360 / 103 | 2439 / 103 | 2349 / 105 |
+
+0.2.7 decodes ~10% slower on this split (3090 + 5070 Ti); prompts are level or slightly faster. Not warm-up (run 2 matches), not the worker count (13 = 8), not drafting (acceptance unchanged: code 77-78%, agent 64-65%). Jim chose to stay on 0.2.7 (newer engine, DeepSeek support) and see whether it does better after the EPYC upgrade. To go back: `git checkout v0.1.43` in `~/lab/Strata` and re-run setup with `--build`. 0.2.7's setup adds no new options to the config; only the RAM-saving settings above differ from its own.
+
 Older results (fork era, 0.1.37 and 0.1.40, IQ3_XXS) are in `ab/results/` and `ab/ab040/`; their prompts came from the Strata source of the day, so only their decode figures compare directly.
 
 ## Updating Strata
