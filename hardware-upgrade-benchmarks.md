@@ -121,6 +121,19 @@ models are in `/mnt/data/models`, everything else from `/mnt/shared` sits direct
 `/mnt/data`. The tables above were measured on the old `/mnt/models` partition of the same
 drive. To repeat the disk test, use `bench/disk.sh /home/jim /mnt/data`.
 
+**After the upgrade (2026-10-30):** the same drives in the H12SSL-NT's M.2 slots (both
+on the CPU's lanes); same test (`disk.sh` changed only in a comment).
+
+| Drive | Seq read 1M QD32 | Seq write 1M QD32 | Rand 4K read QD32×4 | Rand 4K read QD1 |
+|---|---|---|---|---|
+| WD SN7100 (`/home`, btrfs) | 6855 MB/s (−3%) | 2710 MB/s (+3%) | **1082 MB/s · 264K IOPS (+159%)** | **79 MB/s · 19.3K IOPS (44 µs, +72%)** |
+| KIOXIA (`/mnt/data`, xfs) | 7444 MB/s (+5%) | 6477 MB/s (−2%) | 3427 MB/s · 837K IOPS (−15%) | 91 MB/s · 22.1K IOPS (39 µs, +3%) |
+
+Sequential speeds are unchanged: both drives were already at their limits. The WD's random
+reads are much faster: its btrfs checksum work now gets more cores and lower latency. The
+KIOXIA's QD32 random read dropped from ~990K to ~840K IOPS: at that rate the test is
+limited by per-core speed (Zen 3 ~4 GHz against Arrow Lake 5.5 GHz), not the drive.
+
 ## Images (ComfyUI, `bench/image_bench.py`)
 
 Time is ComfyUI's own execution time per image. The first image of each model is cold:
