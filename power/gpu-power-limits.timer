@@ -1,0 +1,9 @@
+[Unit]
+Description=Re-apply GPU power limits every 10 minutes (after a GPU reset or driver reload)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Set GPU power limits by UUID (~/llama-swap/power/gpu-power-limits.sh)
+After=nvidia-persistenced.service systemd-modules-load.service
+Wants=nvidia-persistenced.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/gpu-power-limits.sh
+
+[Install]
+WantedBy=multi-user.target
