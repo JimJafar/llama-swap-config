@@ -67,6 +67,8 @@ The 7443 has four CCDs, and each CCD's link to the I/O die caps what its cores c
 so four-CCD EPYCs measure well below eight-CCD ones on STREAM; at DDR4-2666 this is
 roughly what to expect. One thread is unchanged: per-core bandwidth is about the same as
 the old DDR5 box.
+`dmidecode` confirms all eight channels populated (DIMMA1-DIMMH1, 32 GiB dual-rank each),
+every stick at 2667 MT/s, so the memory itself isn't holding it back.
 
 ## PCIe host↔GPU bandwidth (`bench/pcie_bw.py`, pinned memory, GB/s)
 
