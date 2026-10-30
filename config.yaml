@@ -81,24 +81,13 @@ hooks:
       # 2026-10-03: Strata-IQ3S while Jim evaluates it (it holds `subagent`); it is
       # persistent in its own group, so it coexists with the voice models the same way.
       - Strata-IQ3S
-      - whisper-npu-asr
-      # s1-mini is tiny (462 MiB) and its load is ~seconds, so preloading it at every
-      # llama-swap start keeps Baruch's first dictation warm without startup cost worth
-      # worrying about. (Baruch also warms it on its own start; this covers the case
-      # where llama-swap restarts after Baruch has already booted.)
-      - s1-mini
-      # voice-agent (Qwen3.5-4B): a voice reply should never wait for a load.
-      - Qwen3.5-4B
-      # 2026-10-13: the rest of the ZOTAC's resident models, so a llama-swap restart
-      # brings the whole card back: h2o (System 1) and bge-m3 (markdown-rag). All
-      # five llama.cpp/crispasr residents fit together: ~12.7 of 16 GiB with ezra-ocr.
-      # bge-m3 serves embeddings only, so its chat warm-up fails (logged), but the
-      # model is loaded and stays, as with whisper-npu-asr.
-      - h2o-lightning-4b
+      # 2026-10-30: the dictation and voice-assistant models (whisper-npu-asr, s1-mini,
+      # Qwen3.5-4B, chatterbox-turbo) are no longer preloaded, and are hidden: Jim moved
+      # to a commercial product. Their entries are kept and load on demand by name.
+      # h2o-lightning-4b (System 1, behind h2o-shim) is on demand too, but stays listed.
+      # bge-m3 (markdown-rag) stays: it serves embeddings only, so its chat warm-up fails
+      # (logged), but the model loads and stays.
       - bge-m3
-      # chatterbox-turbo (2026-10-13): alexa-marvin's voice, so it must come back after a
-      # restart. Its chat warm-up 404s (TTS only), but the model loads and stays.
-      - chatterbox-turbo
 
 # Qwen 3.5/3.6/3.8 jinja template fix
 #
@@ -1317,6 +1306,9 @@ models:
     # LD_LIBRARY_PATH is REQUIRED -- the rootless NPU Level Zero driver lives in the venv's
     # openvino/libs dir (the loader does not self-locate).
   whisper-npu-asr:
+    # HIDDEN, NOT PRELOADED (2026-10-30): Jim moved dictation and voice to a commercial
+    # product. Config kept; loads on demand by name.
+    unlisted: true
     checkEndpoint: /health
     env:
       - LD_LIBRARY_PATH=/home/jim/lab/npu-env/lib/python3.13/site-packages/openvino/libs
@@ -1454,6 +1446,9 @@ models:
     # less headroom on this card). License: Apache-2.0 + naming clause (keep the name
     # "S1-mini" by "Superwhisper" wherever it's used).
   s1-mini:
+    # HIDDEN, NOT PRELOADED (2026-10-30): Jim moved dictation and voice to a commercial
+    # product. Config kept; loads on demand by name.
+    unlisted: true
     cmd: |
       docker run --rm --name s1mini --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
@@ -1515,6 +1510,9 @@ models:
   # say the conversion factor first, which fixed it.
   # VRAM ~4.2 GiB with 16K context. -np 1 (MTP does not support more slots yet).
   Qwen3.5-4B:
+    # HIDDEN, NOT PRELOADED (2026-10-30): Jim moved dictation and voice to a commercial
+    # product. Config kept; loads on demand by name.
+    unlisted: true
     cmd: |
       docker run --rm --name qwen354b --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
@@ -1596,6 +1594,9 @@ models:
     # --speaker-identity synthetic silences the warning but asserts something NOT
     # verified. Neither is set -- decide deliberately before adding one.
   chatterbox-turbo:
+    # HIDDEN, NOT PRELOADED (2026-10-30): Jim moved dictation and voice to a commercial
+    # product. Config kept; loads on demand by name.
+    unlisted: true
     checkEndpoint: /health
     env:
       - LD_LIBRARY_PATH=/home/jim/lab/crispasr/crispasr-linux-x86_64-cuda13
