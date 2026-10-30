@@ -15,7 +15,7 @@ import argparse, json, statistics, subprocess, threading, time, urllib.request, 
 import bench  # same directory: chat(), wait_idle(), HEAD, MODEL, OUT
 
 GPUS = {"3090": "10DE:2204-10DE:147D-0000:02:00.0", "5070ti": "10DE:2C05-1569:F332-0000:03:00.0"}
-SMI_INDEX = {"3090": 1, "5070ti": 3}           # nvidia-smi indices since the EPYC upgrade (2026-10-30)
+SMI_INDEX = {"3090": 1, "5070ti": 2}           # nvidia-smi indices since the EPYC upgrade (2026-10-30)
 PRODUCTION = {"3090": 280, "5070ti": 260}
 MAX_C = 85                                      # stop if either card's core passes this
 
@@ -118,12 +118,18 @@ def main():
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--restore", action="store_true")
     ap.add_argument("--model", default=STRATA)
+    ap.add_argument("--keep-limits", action="store_true", help="don't set limits (LACT is off since 2026-10-30)")
     a = ap.parse_args()
     bench.MODEL = a.model
     if a.restore:
         print("restored:", set_limits(PRODUCTION["3090"], PRODUCTION["5070ti"]))
         return
-    print("limits:", set_limits(a.w3090, a.w5070), flush=True)
+    if a.keep_limits:                           # limits already set (gpu-power-limits.service)
+        out = subprocess.run(["nvidia-smi", "--query-gpu=index,power.limit", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True).stdout
+        print("limits (kept):", out.strip().replace("\n", " | "), flush=True)
+    else:
+        print("limits:", set_limits(a.w3090, a.w5070), flush=True)
     print("load_s:", restart_strata(), flush=True)
     rows = []
     for rep in range(a.reps):

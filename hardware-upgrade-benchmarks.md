@@ -82,6 +82,29 @@ every stick at 2667 MT/s, so the memory itself isn't holding it back.
 Expected after the upgrade: about 13–14 GB/s on the 5060 Tis and about 25 GB/s on the
 3090 and 5070 Ti.
 
+**After the upgrade (2026-10-30, ZOTAC out of the machine):**
+
+| GPU | Link while copying | Host→GPU | GPU→host |
+|---|---|---|---|
+| MSI 5060 Ti | 16 GT/s x8 | 14.1 | 14.1 |
+| RTX 3090 | 16 GT/s x16 | 26.6 | 26.4 |
+| RTX 5070 Ti | 16 GT/s x16 | 28.3 | 28.3 |
+
+As expected: about double on every card. The IOMMU is in its default translated mode
+(`iommu: Default domain type: Translated`); bulk transfers don't suffer from it.
+
+**27B Q6 tensor parallel after the upgrade** (`Q3.8-27B-Q6KM`, 3090 + 5070 Ti, 280 / 260 W):
+
+| | Old box | EPYC | Change |
+|---|---|---|---|
+| `llm_bench.py` (9 Oct baseline, older llama.cpp image): short decode / 29K prefill / 29K decode | 63.0 / 1281 / 75.5 | 63.3–70.5 / 1104–1115 / 74.5–100.1 (2 runs) | prefill −13% |
+| `strata/ab/powertest.py` (29 Oct, same image as now): 62K prefill / short decode / long decode, warm | 1142 / ~71 / ~77 | 993 / ~67 / ~78 | prefill −13%, short decode −5% |
+
+The GPUs ran at the same power and clocks (3090 273 W, ~1,600 MHz), so the loss is on the
+host: llama.cpp's `-sm tensor` has the CPU launch, synchronise and copy between the cards
+at every layer (no P2P), which depends on single-thread speed (Zen 3 ~4 GHz against
+Arrow Lake 5.5 GHz). Not yet tried: `iommu=pt` on the kernel command line.
+
 ## SSD (`bench/disk.sh`, fio O_DIRECT, 4 GiB file)
 
 | Drive | Seq read 1M QD32 | Seq write 1M QD32 | Rand 4K read QD32×4 | Rand 4K read QD1 |
