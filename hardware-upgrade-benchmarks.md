@@ -259,7 +259,6 @@ Also compare quants once the RAM is in: Maya-S (current, 339.5 GB) against ISTA-
 GSQ-RCO IQ2_XXS (249 GB, run by Strata 0.2.4's `strata-dsv41` engine). Keep whichever
 does better on the same tests; there was no direct comparison as of 2026-10-24.
 
-**After the upgrade, revisit `strata/yield-strata.sh`.** Since 2026-10-26, Flint and the
-gemma-26B entries unload Strata before they start, because beside Strata they ran the
-62 GB machine out of RAM (hard freeze on 2026-10-25). With 256 GB they can run side by
-side, so drop the wrapper from their `cmd` lines.
+**`strata/yield-strata.sh` is gone (2026-10-30).** From 2026-10-26 it made Flint and the
+gemma-26B entries unload Strata first, because beside it they ran the 62 GB machine out of
+RAM. With 251 GB they run alongside it.

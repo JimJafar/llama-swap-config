@@ -52,6 +52,17 @@ Unchanged from setup, because sweeps confirmed them: `--spec 4 --spec-min-p 0.5`
 
 0.2.7 decodes ~10% slower on this split (3090 + 5070 Ti); prompts are level or slightly faster. Not warm-up (run 2 matches), not the worker count (13 = 8), not drafting (acceptance unchanged: code 77-78%, agent 64-65%). Jim chose to stay on 0.2.7 (newer engine, DeepSeek support) and see whether it does better after the EPYC upgrade. To go back: `git checkout v0.1.43` in `~/lab/Strata` and re-run setup with `--build`. 0.2.7's setup adds no new options to the config; only the RAM-saving settings above differ from its own.
 
+**After the EPYC upgrade (2026-10-30, 0.2.7):** EPYC 7443, 251 GB RAM, the 3090 and 5070 Ti at PCIe 4.0 x16 (Strata measures 26.5 GB/s, was 12.8).
+
+| | old box, 0.2.7 (avg of 2) | EPYC, 62 GB config | EPYC, RAM limits removed (production) |
+|---|---|---|---|
+| 1K / 4K prompt | 437 / 1429 | 749 / 1967 | 774 / 2080 |
+| 16K / 32K prompt | 2539 / 3164 | 3103 / 3681 | 3151 / 3711 |
+| decode: code / prose / explain | 126 / 102 / 110 | 134 / 106 / 115 | 151 / 117 / 127 |
+| agent: prompt / decode | 2400 / 103 | 3066 / 107 | 3094 / 120 |
+
+Production now drops `--mmap-experts` and `--resident-budget-gib 30`, the 62 GB-era limits, so every expert the cards don't hold is pinned in RAM (~20 GB more). Pool workers 8, 16 and 22 measured equal (`sw-arena-w*`), so 8 stays. The prefill gain is the x16 links; the decode gain is the RAM.
+
 Older results (fork era, 0.1.37 and 0.1.40, IQ3_XXS) are in `ab/results/` and `ab/ab040/`; their prompts came from the Strata source of the day, so only their decode figures compare directly.
 
 ## Updating Strata
