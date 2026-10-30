@@ -15,7 +15,7 @@ import argparse, json, statistics, subprocess, threading, time, urllib.request, 
 import bench  # same directory: chat(), wait_idle(), HEAD, MODEL, OUT
 
 GPUS = {"3090": "10DE:2204-10DE:147D-0000:02:00.0", "5070ti": "10DE:2C05-1569:F332-0000:03:00.0"}
-SMI_INDEX = {"3090": 1, "5070ti": 2}           # nvidia-smi indices on Marvin today
+SMI_INDEX = {"3090": 1, "5070ti": 3}           # nvidia-smi indices since the EPYC upgrade (2026-10-30)
 PRODUCTION = {"3090": 280, "5070ti": 260}
 MAX_C = 85                                      # stop if either card's core passes this
 
