@@ -59,6 +59,30 @@ while pgrep -f "serve/server.py --engine strata --config" >/dev/null \
     sleep 0.5
     i=$((i + 1))
 done
+# GPUs by UUID: when CONFIG has "gpu_uuids", rewrite its "gpu" (nvidia-smi numbers, which
+# Strata's server wants) from the cards' current numbers. The numbering changes whenever a
+# card is added, removed or moved (the EPYC upgrade, then a card pulled on 2026-10-30), and
+# a stale number put Strata on the wrong card or stopped it starting.
+python3 - "$CONFIG" <<'PY' || exit 1
+import json, subprocess, sys
+path = sys.argv[1]
+cfg = json.load(open(path))
+uuids = cfg.get("gpu_uuids")
+if uuids:
+    out = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+                         capture_output=True, text=True, check=True).stdout
+    index = {u.strip(): int(i) for i, u in (l.split(",") for l in out.strip().splitlines())}
+    missing = [u for u in uuids if u not in index]
+    if missing:
+        sys.exit(f"run-strata.sh: GPU(s) not found: {missing}")
+    gpu = [index[u] for u in uuids]
+    if cfg.get("gpu") != gpu:
+        print(f"run-strata.sh: gpu {cfg.get('gpu')} -> {gpu} (from gpu_uuids)", file=sys.stderr)
+        cfg["gpu"] = gpu
+        tmp = path + ".tmp"
+        json.dump(cfg, open(tmp, "w"), indent=1)
+        __import__("os").replace(tmp, path)
+PY
 cd "$STRATA_DIR"
 exec "$STRATA_DIR/.venv/bin/python" "$STRATA_DIR/serve/server.py" \
     --engine strata \

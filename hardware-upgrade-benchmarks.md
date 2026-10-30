@@ -213,6 +213,14 @@ To repeat it:
 | | Load | Short prompt → 2048 tok: decode (draft accept) | 29K prompt: prefill / time to first token | 29K prompt: decode (draft accept) |
 |---|---|---|---|---|
 | Maya-S, 4 GPUs | ~45 s (engine start) | **9.3** (71%) | **320** / 91.2 s | **6.8** (67%) |
+| **Maya-S, 4 GPUs, after the upgrade (2026-10-30)** | 60 s | **27.2** (69%) | **674** / 43.3 s | **27.5** (76%) |
+
+After the upgrade (same Maya v1.1.20, same pack and config): all ~125 GB of experts that
+VRAM doesn't hold now fit in RAM (the engine reported 248 GB free and read every one
+ahead), so nothing waits on the SSD. Decode is ~2.9x faster on a short prompt and ~4x after
+the 29K prompt; prefill ~2.1x. The CPU ran 17% of the experts during the 2048-token answer
+(2% during the 29K prompt). GLM Maya-L wasn't re-run yet: the session was interrupted
+when a card was pulled.
 
 Why it's slow:
 - **Most of the model isn't in fast memory.** VRAM holds 49 GB of the 178 GB of weights,

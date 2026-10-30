@@ -1224,10 +1224,12 @@ models:
     # The index was embedded with exactly this GGUF and these flags: changing
     # either means re-embedding all ~41K chunks (about 10 minutes).
   bge-m3:
+    # MSI 5060 Ti since 2026-10-30 (was the ZOTAC, which is out of the machine; both are free
+    # now that the voice stack is gone).
     unlisted: true
     cmd: |
       docker run --rm --name bge --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
       -m /models/bge-m3-FP16.gguf

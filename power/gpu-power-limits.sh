@@ -14,6 +14,10 @@
 # Budget on the NZXT C1500: ~840 W of GPU limits + ~340 W for the rest = ~79% of 1,500 W.
 set -u
 apply() {   # UUID WATTS NAME
+    if ! nvidia-smi -L | grep -q "$1"; then
+        echo "$3 ($1): not installed, skipped"   # a card out of the machine is not an error
+        return
+    fi
     if nvidia-smi -i "$1" -pl "$2" >/dev/null 2>&1; then
         echo "$3 ($1): $2 W"
     else
