@@ -52,6 +52,22 @@ Conditions:
 Triad reaches about 61% of the 96 GB/s theoretical. That share is typical for client
 DDR5 measured with STREAM's byte counting.
 
+**After the upgrade (2026-10-30):** EPYC 7443, 8 × 32 GB DDR4-2666 RDIMM, NPS1. Same
+`mem_bw.c` (checksum unchanged), 2 GiB arrays, best of 10.
+
+| Threads | Copy | Scale | Add | Triad | Triad vs old |
+|---|---|---|---|---|---|
+| 48 (`nproc`) | 79.7 | 79.2 | 88.7 | **88.6** | +51% (vs 20 threads) |
+| 24 (one per core) | 79.7 | 79.2 | 87.5 | 86.7 | |
+| 8 | 80.1 | 86.5 | 88.6 | 89.1 | +57% |
+| 1 | 31.5 | 31.1 | 32.5 | 33.0 | +2% |
+
+Triad is about 52% of the 170 GB/s theoretical, and it is already flat at 8 threads.
+The 7443 has four CCDs, and each CCD's link to the I/O die caps what its cores can pull,
+so four-CCD EPYCs measure well below eight-CCD ones on STREAM; at DDR4-2666 this is
+roughly what to expect. One thread is unchanged: per-core bandwidth is about the same as
+the old DDR5 box.
+
 ## PCIe host↔GPU bandwidth (`bench/pcie_bw.py`, pinned memory, GB/s)
 
 | GPU | Link while copying | Host→GPU | GPU→host |
