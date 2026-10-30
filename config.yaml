@@ -1627,7 +1627,41 @@ models:
     #   CLEANUP, or GPU 0 will OOM (the NPU ASR still works). The 2-GPU entries       #
     #   (vLLM TP + the -sm tensor TP entry, pinned to idx 1,2) coexist with it fine.   #
     # ############################################################################## #
+  # --- Project Maya (2026-10-30): its own engines for the two big MoE models ---
+  # ~/lab/project-maya (v1.1.20), started by maya/run-maya.sh, which maps GPU UUIDs to
+  # nvidia-smi numbers (skipping cards that aren't installed), unloads Strata (Maya needs
+  # every card), then runs Maya's server. Maya pins most of the free RAM while loaded.
+  # Each split lists the cards in the order Maya's setup chose them.
+  maya-glm:
+    # GLM-5.3-Flash, Maya-L (IQ3_S, ~156 GB of weights in /mnt/data/models/Maya-L), 32K
+    # context, MTP drafting. Benchmarks: hardware-upgrade-benchmarks.md (Maya section).
+    checkEndpoint: /v1/models
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: glm-5.3-flash
+    cmd: >-
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-maya-l.json
+      GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+  maya-deepseek:
+    # DeepSeek-V4.1-Flash-1017, Maya-S (~178 GB of weights + 161 GB Engram tables in
+    # /mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF), 32K context, DSpark drafting, vision.
+    checkEndpoint: /v1/models
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: deepseek-v4.1-flash
+    cmd: >-
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json
+      GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+
 groups:
+  "maya":
+    swap: true
+    exclusive: true
+    persistent: false
+    # The Maya entries use every card and most of the RAM, so they swap with each other
+    # and evict the non-persistent groups. run-maya.sh unloads Strata itself; the next
+    # Strata request evicts them.
+    members:
+      - maya-glm
+      - maya-deepseek
   "gemma-26b":
     swap: true
     exclusive: false
@@ -1689,8 +1723,11 @@ groups:
       - Swift-1.5-27B-Q6KS
   "resident":
     swap: false
-    exclusive: true
+    exclusive: false
     persistent: true
+    # exclusive was true until 2026-10-30 (the voice stack evicted other models). With the
+    # voice models gone it holds bge-m3 and the on-demand h2o, and as exclusive every
+    # markdown-rag embedding request evicted the Maya entries.
     # THE ALWAYS-ON STACK (2026-10-01): Strata plus the voice models. Replaces the
     # "strata" group and the voice half of "gemma-resident".
     # WHY ONE GROUP: "strata" was exclusive and "gemma-resident" was not persistent,
