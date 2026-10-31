@@ -8,7 +8,8 @@
         {
           "id": "subagent",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "contextWindow": 262144,
           "maxTokens": 249036,
@@ -30,7 +31,8 @@
         {
           "id": "Strata-IQ3S",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "contextWindow": 262144,
           "maxTokens": 249036,
@@ -238,56 +240,20 @@
           "maxTokens": 243200
         },
         {
+          "input": [
+            "text"
+          ],
+          "id": "gemma-26b-fast",
+          "contextWindow": 32768,
+          "maxTokens": 31129
+        },
+        {
           "id": "gemma-4-E4B-MTP",
           "input": [
             "text"
           ],
           "contextWindow": 102400,
           "maxTokens": 97280
-        },
-        {
-          "id": "s1-mini",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 8192,
-          "maxTokens": 7782
-        },
-        {
-          "input": [
-            "text"
-          ],
-          "id": "voice-agent",
-          "contextWindow": 16384,
-          "maxTokens": 15564,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          }
-        },
-        {
-          "input": [
-            "text"
-          ],
-          "id": "Qwen3.5-4B",
-          "contextWindow": 16384,
-          "maxTokens": 15564,
-          "reasoning": true,
-          "thinkingLevelMap": {},
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              }
-            }
-          }
         },
         {
           "input": [
@@ -298,12 +264,40 @@
           "maxTokens": 15564
         },
         {
-          "id": "chatterbox-turbo",
           "input": [
             "text"
           ],
-          "contextWindow": 32768,
-          "maxTokens": 31129
+          "id": "maya-glm",
+          "contextWindow": 262144,
+          "maxTokens": 249036
+        },
+        {
+          "input": [
+            "text"
+          ],
+          "id": "maya-deepseek",
+          "contextWindow": 262144,
+          "maxTokens": 249036,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
         }
       ]
     }

@@ -1633,22 +1633,23 @@ models:
   # every card), then runs Maya's server. Maya pins most of the free RAM while loaded.
   # Each split lists the cards in the order Maya's setup chose them.
   maya-glm:
-    # GLM-5.3-Flash, Maya-L (IQ3_S, ~156 GB of weights in /mnt/data/models/Maya-L), 32K
-    # context, MTP drafting. Benchmarks: hardware-upgrade-benchmarks.md (Maya section).
+    # GLM-5.3-Flash, Maya-L (IQ3_S, ~156 GB of weights in /mnt/data/models/Maya-L), 256K
+    # context (32K until 2026-10-31: a long thinking answer filled it), MTP drafting. Benchmarks: hardware-upgrade-benchmarks.md (Maya section).
     checkEndpoint: /v1/models
     proxy: http://127.0.0.1:${PORT}
     useModelName: glm-5.3-flash
     cmd: >-
-      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-maya-l.json
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-maya-l.json --max-context 262144
       GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
   maya-deepseek:
     # DeepSeek-V4.1-Flash-1017, Maya-S (~178 GB of weights + 161 GB Engram tables in
-    # /mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF), 32K context, DSpark drafting, vision.
+    # /mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF), 256K context (32K until 2026-10-31),
+    # DSpark drafting, vision.
     checkEndpoint: /v1/models
     proxy: http://127.0.0.1:${PORT}
     useModelName: deepseek-v4.1-flash
     cmd: >-
-      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
 
 groups:

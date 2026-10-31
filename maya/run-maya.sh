@@ -1,5 +1,5 @@
 #!/bin/sh
-# Project Maya under llama-swap:  run-maya.sh PORT CONFIG UUID [UUID ...]
+# Project Maya under llama-swap:  run-maya.sh PORT CONFIG [--max-context N] UUID [UUID ...]
 #
 # CONFIG is one of Maya's own configs in ~/lab/project-maya (maya-maya-l.json for
 # GLM-5.3-Flash, maya-ds4.json for DeepSeek-V4.1-Flash-1017). The UUIDs are the GPUs
@@ -7,7 +7,9 @@
 # runs on whatever is in the machine (e.g. three cards while the ZOTAC is out).
 #
 # 1. Rewrites the config's "gpu" (nvidia-smi numbers, which Maya wants) from the UUIDs:
-#    the numbering changes whenever a card is added, removed or moved.
+#    the numbering changes whenever a card is added, removed or moved. With
+#    --max-context N, also sets the engine's context there (so llama-swap's config.yaml is
+#    where it's chosen, and sync-models.py reads it for pi's models.json).
 # 2. Unloads Strata: Maya needs every card, and Strata's group is persistent, so
 #    llama-swap won't evict it. Going back is automatic: a Strata request evicts Maya
 #    (Strata's group is exclusive, the "maya" group isn't persistent).
@@ -19,11 +21,13 @@ set -eu
 PORT="${1:?usage: run-maya.sh PORT CONFIG UUID...}"
 CONFIG="${2:?usage: run-maya.sh PORT CONFIG UUID...}"
 shift 2
+CTX=""
+if [ "${1:-}" = "--max-context" ]; then CTX="$2"; shift 2; fi
 MAYA=/home/jim/lab/project-maya
 
-python3 - "$CONFIG" "$@" <<'PY'
+python3 - "$CONFIG" "$CTX" "$@" <<'PY'
 import json, os, subprocess, sys
-path, uuids = sys.argv[1], sys.argv[2:]
+path, ctx, uuids = sys.argv[1], sys.argv[2], sys.argv[3:]
 out = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
                      capture_output=True, text=True, check=True).stdout
 index = {u.strip(): int(i) for i, u in (l.split(",") for l in out.strip().splitlines())}
@@ -34,8 +38,20 @@ if not gpu:
 cfg = json.load(open(path))
 print(f"run-maya.sh: gpu {cfg.get('gpu')} -> {gpu}" + (f" (not installed: {skipped})" if skipped else ""),
       file=sys.stderr)
-if cfg.get("gpu") != gpu:
-    cfg["gpu"] = gpu
+changed = cfg.get("gpu") != gpu
+cfg["gpu"] = gpu
+if ctx:
+    args = cfg.get("args", [])
+    if "--max-context" in args:
+        i = args.index("--max-context")
+        if args[i + 1] != ctx:
+            print(f"run-maya.sh: --max-context {args[i + 1]} -> {ctx}", file=sys.stderr)
+            args[i + 1] = ctx
+            changed = True
+    else:
+        args += ["--max-context", ctx]
+        changed = True
+if changed:
     json.dump(cfg, open(path + ".tmp", "w"), indent=1)
     os.replace(path + ".tmp", path)
 PY

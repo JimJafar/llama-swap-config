@@ -276,6 +276,7 @@ def context_window(cmd: str) -> int | None:
             or re.search(r"--fit-ctx\s+(\d+)", body)        # llama.cpp --fit floor
             or re.search(r"--max-model-len\s+(\d+)", body)   # vLLM
             or re.search(r"--max-seq-len\s+(\d+)", body)     # TabbyAPI / exllamav3
+            or re.search(r"--max-context\s+(\d+)", body)    # Strata / Project Maya (maya/run-maya.sh)
         )
         return int(m.group(1)) if m else None
     except (re.error, ValueError):
