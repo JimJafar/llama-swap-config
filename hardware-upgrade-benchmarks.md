@@ -90,8 +90,9 @@ Expected after the upgrade: about 13–14 GB/s on the 5060 Tis and about 25 GB/s
 | RTX 3090 | 16 GT/s x16 | 26.6 | 26.4 |
 | RTX 5070 Ti | 16 GT/s x16 | 28.3 | 28.3 |
 
-As expected: about double on every card. The IOMMU is in its default translated mode
-(`iommu: Default domain type: Translated`); bulk transfers don't suffer from it.
+As expected: about double on every card. The IOMMU was in its default translated mode
+then (`iommu: Default domain type: Translated`); bulk transfers don't suffer from it. Since
+2026-10-31 it is in passthrough (`iommu=pt`, see the 27B section).
 
 **27B Q6 tensor parallel after the upgrade** (`Q3.8-27B-Q6KM`, 3090 + 5070 Ti, 280 / 260 W):
 
@@ -101,9 +102,21 @@ As expected: about double on every card. The IOMMU is in its default translated 
 | `strata/ab/powertest.py` (29 Oct, same image as now): 62K prefill / short decode / long decode, warm | 1142 / ~71 / ~77 | 993 / ~67 / ~78 | prefill −13%, short decode −5% |
 
 The GPUs ran at the same power and clocks (3090 273 W, ~1,600 MHz), so the loss is on the
-host: llama.cpp's `-sm tensor` has the CPU launch, synchronise and copy between the cards
-at every layer (no P2P), which depends on single-thread speed (Zen 3 ~4 GHz against
-Arrow Lake 5.5 GHz). Not yet tried: `iommu=pt` on the kernel command line.
+host. It is probably not single-thread CPU speed, as first assumed: decode, which leans on
+the CPU most, held up, while prefill lost 13%. More likely it is the relay between the
+cards: with no P2P, NCCL passes each layer's results through system RAM, and the two cards
+now sit on different quadrants of the I/O die (`NODE` in `nvidia-smi topo -m`).
+
+**Tuning tried (2026-10-31), 62K prefill, warm:**
+
+| Setting | Prefill | Result |
+|---|---|---|
+| Baseline (llama.cpp b12004, IOMMU translated) | 997 / 997 | |
+| `NCCL_SHM_USE_CUDA_MEMCPY=1` (copy engines for the relay) | – | **hangs**: the first request never completes. Don't use |
+| **`iommu=pt`** on the kernel command line (Limine, `/etc/default/limine`) | 1,041 cold / 1,030 warm | **+3.5%**, decode unchanged. Kept |
+
+About a quarter of the gap back; the rest (~10% below the old box) is still unexplained.
+Results: `strata/ab/results/power-Q6-epyc-iommu-pt-20261031-224357.jsonl`.
 
 ## SSD (`bench/disk.sh`, fio O_DIRECT, 4 GiB file)
 
