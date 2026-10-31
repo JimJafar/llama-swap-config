@@ -118,6 +118,30 @@ MAX_TOKENS_RATIO = 0.95
 # the level unsupported (hidden/clamped by pi). Values must match what each
 # template accepts - some templates throw on unknown effort values.
 THINKING_WIRING = [
+    # Project Maya (maya-glm, maya-deepseek; maya/run-maya.sh). FIRST: maya-deepseek would
+    # otherwise match the llama.cpp DeepSeek spec below, whose `thinking` kwarg Maya's
+    # server ignores (thinking could not be turned off). Maya reads top-level or
+    # chat_template_kwargs `reasoning_effort` (none/low/medium/high/xhigh/max, folded to
+    # none/low/high/max: medium = high, xhigh = max) and `enable_thinking: false`
+    # (serve/frontend.py, v1.1.42). Both configs default to "high" (2026-10-31).
+    {
+        "marker": "maya-",
+        "defaultLevel": "high",
+        "fields": {
+            "reasoning": True,
+            "thinkingLevelMap": {
+                "minimal": None, "low": "low", "medium": None,
+                "high": "high", "xhigh": "max", "max": "max",
+            },
+            "compat": {
+                "thinkingFormat": "chat-template",
+                "chatTemplateKwargs": {
+                    "enable_thinking": {"$var": "thinking.enabled"},
+                    "reasoning_effort": {"$var": "thinking.effort"},
+                },
+            },
+        },
+    },
     # Qwen3.8: full on/off + effort. Template accepts low/medium/high/xhigh
     # (qwen-3_8-improved-chat-template.jinja validates and raises otherwise).
     # `marker` may be a string OR a list of strings (see the matching loop in

@@ -269,7 +269,27 @@
           ],
           "id": "maya-glm",
           "contextWindow": 262144,
-          "maxTokens": 249036
+          "maxTokens": 249036,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
         },
         {
           "input": [
@@ -290,7 +310,7 @@
           "compat": {
             "thinkingFormat": "chat-template",
             "chatTemplateKwargs": {
-              "thinking": {
+              "enable_thinking": {
                 "$var": "thinking.enabled"
               },
               "reasoning_effort": {
