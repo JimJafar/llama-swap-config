@@ -1,5 +1,7 @@
 [Unit]
 Description=Claude Code sessions in tmux (~/.config/claude-sessions.txt)
+# Before clauderc so the tmux server is ours (its own scope), not one inside clauderc's cgroup.
+Before=clauderc.service
 
 [Service]
 Type=oneshot

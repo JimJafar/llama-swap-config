@@ -18,6 +18,15 @@ LIST="${1:-$HOME/.config/claude-sessions.txt}"
 HOST=$(hostname -s)
 [ -r "$LIST" ] || { echo "claude-sessions: no list at $LIST" >&2; exit 1; }
 
+# Start the tmux server in a systemd scope of its own, so it outlives whichever service
+# happens to start it: a server started inside a service's cgroup is killed with that
+# service (2026-10-31: a crash-looping clauderc.service took the boot sessions down).
+# exit-empty off keeps it up until the first session exists.
+if ! tmux list-sessions >/dev/null 2>&1; then
+    systemd-run --user --scope --quiet --collect --unit="tmux-server-$$" \
+        tmux start-server \; set-option -g exit-empty off
+fi
+
 # Remote Control needs the network: wait up to 2 minutes for DNS after boot.
 i=0
 until getent hosts claude.ai >/dev/null 2>&1 || [ $i -ge 60 ]; do sleep 2; i=$((i + 1)); done
