@@ -1,0 +1,5 @@
+# Claude Code sessions started in tmux at boot by claude-sessions (one per line).
+# name        host    directory
+llama-swap    marvin  ~/llama-swap
+librarian     colin   ~/code/the-librarian
+archivist     colin   ~/code/the-archivist

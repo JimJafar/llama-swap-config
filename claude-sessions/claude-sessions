@@ -1,0 +1,49 @@
+#!/bin/sh
+# claude-sessions: start this host's Claude Code sessions in detached tmux sessions.
+#
+#   claude-sessions [LIST]     (default ~/.config/claude-sessions.txt)
+#
+# For each "name host directory" line whose host is this machine (hostname -s), starts
+#   tmux new-session -d -s NAME -c DIR  "claude -c --remote-control NAME"
+# unless a tmux session called NAME exists, or a claude process already runs in DIR,
+# so it is safe to run again.
+# -c continues the most recent conversation in DIR; --remote-control NAME makes it
+# reachable (under that name) from the Claude apps. If claude exits, the tmux session
+# drops to a login shell instead of closing. Attach with: tmux attach -t NAME
+#
+# Run at boot by the claude-sessions.service user unit (with lingering on). Source and
+# list: ~/llama-swap/claude-sessions/ on Marvin; install.sh copies them to each host.
+set -u
+LIST="${1:-$HOME/.config/claude-sessions.txt}"
+HOST=$(hostname -s)
+[ -r "$LIST" ] || { echo "claude-sessions: no list at $LIST" >&2; exit 1; }
+
+# Remote Control needs the network: wait up to 2 minutes for DNS after boot.
+i=0
+until getent hosts claude.ai >/dev/null 2>&1 || [ $i -ge 60 ]; do sleep 2; i=$((i + 1)); done
+
+grep -v '^[[:space:]]*#' "$LIST" | while read -r name host dir; do
+    [ -n "${name:-}" ] && [ "$host" = "$HOST" ] || continue
+    dir=$(eval echo "$dir")                    # expand ~
+    if tmux has-session -t "=$name" 2>/dev/null; then
+        echo "claude-sessions: $name already running"
+        continue
+    fi
+    # Never start a second Claude in a directory that already has one: -c would resume
+    # the same conversation as the running session and the two would clash.
+    busy=""
+    for p in $(pgrep -x claude 2>/dev/null); do
+        [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$dir" ] && busy=$p && break
+    done
+    if [ -n "$busy" ]; then
+        echo "claude-sessions: $name: claude (pid $busy) already runs in $dir, skipped"
+        continue
+    fi
+    if [ ! -d "$dir" ]; then
+        echo "claude-sessions: $name: no directory $dir" >&2
+        continue
+    fi
+    tmux new-session -d -s "$name" -c "$dir" \
+        "zsh -lic 'claude -c --remote-control $name; exec zsh -l'"
+    echo "claude-sessions: started $name in $dir"
+done

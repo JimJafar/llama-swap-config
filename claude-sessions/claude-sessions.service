@@ -1,0 +1,13 @@
+[Unit]
+Description=Claude Code sessions in tmux (~/.config/claude-sessions.txt)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/claude-sessions
+# Only the script itself is stopped with the unit; the tmux server and its sessions
+# (yours too, since they share the default server) keep running.
+KillMode=process
+
+[Install]
+WantedBy=default.target
