@@ -4,7 +4,17 @@
     "alias": "qwen3.8-flash-next-basalt",
     "gpu": "0",
     "host": "127.0.0.1",
-    "port": 8080
+    "port": 8080,
+    "allowed-host": [
+      ".akita-betelgeuse.ts.net",
+      "marvin"
+    ]
   },
-  "engine": { "max-context": 262144, "kv": "int8", "resident-experts": true, "expert-cache": "auto", "prefill": "auto" }
+  "engine": {
+    "max-context": 262144,
+    "kv": "int8",
+    "resident-experts": true,
+    "expert-cache": "auto",
+    "prefill": "auto"
+  }
 }
