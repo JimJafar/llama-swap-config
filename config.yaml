@@ -356,7 +356,7 @@ models:
     # deleted 2026-10-06; the model file is gone too. Config kept for A/B reference.
     unlisted: true
     cmd: |
-      docker run --rm --name qwen38-flash-q20 --runtime nvidia --ipc=host
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name qwen38-flash-q20 --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
@@ -458,7 +458,7 @@ models:
     # froggeric/Qwen-Fixed-Chat-Templates for a Qwen3.8 update.
   Q3.8-27B-Q6KM:
     cmd: |
-      docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # GPU re-pin (2026-09-09): moved OFF the 5060 Ti (57bbb375, 16 GiB) onto the
       # 3090 (93ab52e5, 24 GiB). CUDA0 = 3090 = --main-gpu 0, CUDA1 = 5070 Ti
@@ -586,7 +586,7 @@ models:
   # MUST stay in the `qwen38-workload` group or it will not swap.
   Hemmingway:
     cmd: |
-      docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -685,7 +685,7 @@ models:
   # first (switch-profile.sh) -- this entry cannot evict a persistent group.
   Swift-1.5-27B-Q6KS:
     cmd: |
-      docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
       # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
@@ -784,7 +784,7 @@ models:
     # Xorg/compositor). See inline probe notes.
   Q3.8-27B-IQ4XS:
     cmd: |
-      docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # GPU re-pin (2026-09-08): the 5070 Ti (d64df8cf, 16 GiB @ 03:00.0) is back in
       # the box, so this pair moves OFF the 5060 Ti (57bbb375, 16 GiB @ 01:00.0) onto
@@ -920,7 +920,7 @@ models:
     # so it remains the performance comparison point.
   Q3.8-27B-IQ4XS-DF2:
     cmd: |
-      docker run --rm --name q38iq4xsdflash2tp --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name q38iq4xsdflash2tp --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # Same 2-card UUID pinning as the MTP sibling (MSI 5060 Ti first = device0).
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
@@ -1009,7 +1009,7 @@ models:
     # Keep --spec-type draft-dflash. Depth 3 is the measured optimum for this drafter.
   muse-glimmer-30B-dflash-vision:
     cmd: |
-      docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server
@@ -1056,7 +1056,7 @@ models:
     # with `-devd CUDA1`.
   gemma-4-31B-Q4-MTP:
     cmd: |
-      docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      /home/jim/llama-swap/strata/free-strata.sh docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
@@ -1748,9 +1748,9 @@ groups:
     #   exclusive:true   -> loading any member evicts non-persistent models, which
     #                       frees the 3090 + 5070 Ti for Strata's engine. Side effect:
     #                       reloading a voice model also evicts ad-hoc loads.
-    #   persistent:true  -> nothing evicts a member. Anything else wanting the 3090 or
-    #                       5070 Ti (the qwen38-workload models) cannot load until you
-    #                       unload Strata.
+    #   persistent:true  -> nothing evicts a member. Models that need the 3090 or 5070 Ti
+    #                       free them themselves: their cmd starts with
+    #                       strata/free-strata.sh, which unloads Strata (2026-11-01).
     # Strata itself (Strata-IQ3S) is in its own group, "strata-iq3s", with the same
     # exclusive + persistent settings; it was here until Strata-IQ3XXS was deleted.
     # chatterbox-turbo is not preloaded (preload warms with a chat request, which
@@ -1778,5 +1778,7 @@ groups:
     #   persistent:true -> nothing evicts it. It was false at first, and then every
     #                      dictation request evicted it: llama-swap enforces the resident
     #                      group's `exclusive` on each request to a member, not only on load.
+    #                      Models that need its cards unload it themselves (free-strata.sh in
+    #                      their cmd, like run-maya.sh); it reloads on its next request.
     members:
       - Strata-IQ3S
