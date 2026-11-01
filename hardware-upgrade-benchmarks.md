@@ -120,6 +120,14 @@ now sit on different quadrants of the I/O die (`NODE` in `nvidia-smi topo -m`).
 
 Prefill is now ~2% below the old box (1,146): a bigger micro-batch halves the relays
 between the cards per prompt.
+
+The other tensor-parallel entries, one cold run each (64K prefill / decode, short decode):
+
+| Entry | `-ub 512` | `-ub 1024` | Result |
+|---|---|---|---|
+| `Swift-1.5-27B-Q6KS` (split 1.00,0.65 both) | 1,024 / 66.1, 64.1 | 1,112 / 65.3, 63.4 | **+9% prefill**, decode same. Changed to 1024 |
+| `Hemmingway` (1024 needs split 0.95, was 1.00) | 1,195 / 79.3, 77.5 | 1,201 / 69.4, 74.0 | no gain, decode −4%. Kept 512 |
+| `Q3.8-27B-IQ4XS` (`-c 393216`, `-np 4`) | – | doesn't fit | 0.65 OOMs the 5070 Ti at load, 0.60 the 3090 on the first prompt. Kept 512 |
 Results: `strata/ab/results/power-Q6-epyc-iommu-pt-20261031-224357.jsonl`,
 `power-Q6-epyc-bios-apbdis-rebar-20261101-000707.jsonl`, `power-Q6-epyc-bios-perfgov-20261101-003035.jsonl`
 (performance governor: no change, reverted), `power-Q6-epyc-ub1024-ts070-20261101-004347.jsonl`.

@@ -608,6 +608,7 @@ models:
       -c 262144
       -ctk q8_0
       -ctv q8_0
+      # -ub 1024 tried 2026-11-01 (EPYC): needs split 1.00,0.95, prefill +0.5%, decode -4%: kept 512.
       -ub 512
       -np 1
       # 1.00,1.00 is the balance point for this card pair -- the Q3.8-27B-IQ4XS notes record
@@ -715,7 +716,9 @@ models:
       -c 262144
       -ctk q8_0
       -ctv q8_0
-      -ub 512
+      # -ub 1024 (2026-11-01, EPYC): fits at the same 1.00,0.65 split; 64K prefill 1,024 ->
+      # 1,112 tok/s (+9%), decode unchanged. (Hemmingway: no gain, kept 512. IQ4XS: OOMs at 393K.)
+      -ub 1024
       -np 1
       # weighted to the 3090 -- see SPLIT above. 1.00,1.00 (Hemmingway) OOMs
       # device1 at this file size.
@@ -879,6 +882,8 @@ models:
       # -c 262144, pull the ratio back toward the 3090 (e.g. 1.00,0.70) to trade load for fit.
       --tensor-split 1.00,0.70
       # -np 2
+      # -ub 1024 tried 2026-11-01: no split fits at -c 393216 (0.65+ OOMs the 5070 Ti at load,
+      # 0.60 OOMs the 3090 on the first prompt). Kept 512; would need a smaller -c.
       -ub 512
       --temp 1.0
       --top-p 0.95
