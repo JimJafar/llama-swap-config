@@ -496,9 +496,14 @@ models:
       # "very nearly as fast as Q4_XS". NOTE 0.80 CANNOT hold 262144 -- the 5070 Ti OOMs at
       # that context; the 262K profile uses 1.00,0.65 (config.yaml.snap-q6-262K-20260910-115747).
       # Meta() split is a sharp step, not a dial.
-      --tensor-split 1.00,0.80
+      # 2026-11-01 (EPYC): 1.00,0.70 with -ub 1024 below. 1024 needs ~0.6 GiB more on the
+      # 5070 Ti, which OOMs at 0.80; at 0.70 ~2 / ~0.9 GiB stay free (3090 / 5070 Ti).
+      # 64K prefill 1,070 -> 1,120 tok/s, short decode ~-3% (the 3090 does more per token).
+      --tensor-split 1.00,0.70
       -np 1
-      -ub 512
+      # -ub 1024 (2026-11-01): half as many card-to-card relays per prompt; that relay through
+      # system RAM is what made prefill slower on the EPYC. Was 512 since c31d615 (OOM on 2x16 GB).
+      -ub 1024
 
       --temp 1.0
       --top-p 0.95

@@ -116,9 +116,13 @@ now sit on different quadrants of the I/O die (`NODE` in `nvidia-smi topo -m`).
 | **`iommu=pt`** on the kernel command line (Limine, `/etc/default/limine`) | 1,041 cold / 1,030 warm | **+3.5%**, decode unchanged. Kept |
 | **+ BIOS** (2026-11-01): APBDIS 1 with fixed SOC P-state P0, determinism Power, Resizable BAR on (BAR1 was 256 MiB, now full VRAM), PCIe Ten Bit Tag on | 1,080 cold / 1,070 warm | **another +4%** (+7% in all), decode unchanged. Kept; which of the four helped wasn't separated |
 
-More than half the gap back; prefill is now ~6.5% below the old box (1,146).
+| **+ `-ub 1024`** (was 512) with `--tensor-split 1.00,0.70` (was 0.80; 1024 OOMs the 5070 Ti at 0.80) | 1,131 cold / 1,120 warm | **another +5%**; short decode ~−3%. Kept (config.yaml) |
+
+Prefill is now ~2% below the old box (1,146): a bigger micro-batch halves the relays
+between the cards per prompt.
 Results: `strata/ab/results/power-Q6-epyc-iommu-pt-20261031-224357.jsonl`,
-`power-Q6-epyc-bios-apbdis-rebar-20261101-000707.jsonl`.
+`power-Q6-epyc-bios-apbdis-rebar-20261101-000707.jsonl`, `power-Q6-epyc-bios-perfgov-20261101-003035.jsonl`
+(performance governor: no change, reverted), `power-Q6-epyc-ub1024-ts070-20261101-004347.jsonl`.
 
 ## SSD (`bench/disk.sh`, fio O_DIRECT, 4 GiB file)
 
