@@ -78,7 +78,19 @@ STRATA_CONFIGS: dict[str, Path] = {
 }
 
 
+# Basalt (2026-11-01): the same idea; its JSON config has "engine": {"max-context": N}.
+BASALT_CONFIGS: dict[str, Path] = {
+    "Basalt-QFN": Path(__file__).resolve().parent / "basalt" / "basalt-qfn.json",
+}
+
+
 def strata_context(model_id: str) -> int | None:
+    bpath = BASALT_CONFIGS.get(model_id)
+    if bpath is not None:
+        try:
+            return int(json.loads(bpath.read_text())["engine"]["max-context"])
+        except (OSError, KeyError, ValueError, TypeError):
+            return None
     path = STRATA_CONFIGS.get(model_id)
     if path is None:
         return None
@@ -244,8 +256,10 @@ THINKING_WIRING = [
     # Checked live: Strata passes `xhigh` through. So pi shows off/low/medium/xhigh;
     # minimal and high are hidden -- they were only aliases for low and xhigh.
     {
-        "marker": "strata",
-        "defaultLevel": "medium",   # Strata serves Qwen3.8-Flash-Next models
+        # 2026-11-01: Basalt (a Strata fork, Basalt-QFN = `subagent`) takes the same levels
+        # (serve/frontend.py: none/low/medium/high->xhigh/xhigh) and the same OpenAI field.
+        "marker": ["strata", "basalt"],
+        "defaultLevel": "medium",   # Strata and Basalt serve Qwen3.8-Flash-Next models
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {

@@ -29,6 +29,29 @@
           }
         },
         {
+          "id": "Basalt-QFN",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 262144,
+          "maxTokens": 249036,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": "off",
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": null,
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "compat": {
+            "supportsDeveloperRole": false,
+            "thinkingFormat": "openai"
+          }
+        },
+        {
           "id": "Strata-IQ3S",
           "input": [
             "text",
