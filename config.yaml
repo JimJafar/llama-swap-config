@@ -1799,11 +1799,10 @@ groups:
     #   exclusive:true   -> loading any member evicts non-persistent models, which
     #                       frees the 3090 + 5070 Ti for Strata's engine. Side effect:
     #                       reloading a voice model also evicts ad-hoc loads.
-    #   persistent:true  -> nothing evicts a member. Models that need the 3090 or 5070 Ti
-    #                       free them themselves: their cmd starts with
-    #                       strata/free-strata.sh, which unloads Strata (2026-11-01).
-    # Strata itself (Strata-IQ3S) is in its own group, "strata-iq3s", with the same
-    # exclusive + persistent settings; it was here until Strata-IQ3XXS was deleted.
+    #   persistent:true  -> nothing evicts a member. Models that need the big cards free
+    #                       them themselves: their cmd starts with strata/free-models.sh.
+    # Strata itself (Strata-IQ3S) is in its own group, "strata-iq3s" (on demand since
+    # 2026-11-01); it was here until Strata-IQ3XXS was deleted.
     # chatterbox-turbo is not preloaded (preload warms with a chat request, which
     # 404s on a TTS backend); it loads on its first request and then stays.
     members:
@@ -1827,10 +1826,9 @@ groups:
     # Strata-IQ3S (2026-10-03; the only Strata since 2026-10-12).
     #   exclusive:true  -> like Strata, loading it frees the 3090 + 5070 Ti of the
     #                      non-persistent models (the voice stack is persistent: it stays).
-    #   persistent:true -> nothing evicts it. It was false at first, and then every
-    #                      dictation request evicted it: llama-swap enforces the resident
-    #                      group's `exclusive` on each request to a member, not only on load.
-    #                      Models that need its cards unload it themselves (free-strata.sh in
-    #                      their cmd, like run-maya.sh); it reloads on its next request.
+    #   persistent was true 2026-10-03 to 2026-11-01 (dictation requests evicted it while it
+    #                      was the default); false now that the "pair" group is the default
+    #                      and Strata is on demand. Models that need its cards still unload it
+    #                      (strata/free-models.sh in their cmd).
     members:
       - Strata-IQ3S
