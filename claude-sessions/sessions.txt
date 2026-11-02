@@ -3,3 +3,4 @@
 llama-swap    marvin  ~/llama-swap
 librarian     colin   ~/code/the-librarian
 archivist     colin   ~/code/the-archivist
+software-factory  colin   ~/code/software-factory
