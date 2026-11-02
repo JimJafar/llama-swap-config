@@ -1,0 +1,12 @@
+[Unit]
+Description=LiteLLM gateway in front of llama-swap, tracing to Opik (~/llama-swap/litellm)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/jim/llama-swap/litellm/run.sh
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

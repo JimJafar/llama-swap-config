@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart the LiteLLM gateway (model list regenerated from config.yaml)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user try-restart litellm.service

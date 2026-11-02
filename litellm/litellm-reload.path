@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart the LiteLLM gateway when llama-swap's config.yaml changes
+
+[Path]
+PathChanged=/home/jim/llama-swap/config.yaml
+Unit=litellm-reload.service
+
+[Install]
+WantedBy=default.target
