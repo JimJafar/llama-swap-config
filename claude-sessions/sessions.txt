@@ -1,7 +1,4 @@
 # Claude Code sessions started in tmux at boot by claude-sessions (one per line).
 # name        host    directory
+# Colin's agents are started on demand by Antioch (~/code/antioch, https://colin.akita-betelgeuse.ts.net:8780).
 llama-swap    marvin  ~/llama-swap
-librarian     colin   ~/code/the-librarian
-archivist     colin   ~/code/the-archivist
-software-factory  colin   ~/code/software-factory
-obsidian          colin   ~/Documents/obsidian-md
