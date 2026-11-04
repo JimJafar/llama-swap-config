@@ -320,8 +320,8 @@ models:
     # (its self-distilled drafter and vision). Quality (Basalt's published UD-Q4_K_XL, with
     # the IQ4_NL table): top-1 92.6%, KLD 0.050, against IQ3_S's 87.6% / 0.150.
     # Engine config basalt/basalt-q4kxl.json: 256K context, int8 KV, 75.5 GB of experts
-    # pinned in RAM, the n-gram table read from the SSD (--ple-io direct: no RAM; locking it
-    # in RAM measured no faster, partly: memlock was 8 MB), 2 GiB left free on the MSI for
+    # pinned in RAM, the n-gram table read from the SSD (--ple-io direct: no RAM; locked in
+    # RAM, 53 GB with memlock raised, it measured the same within noise), 2 GiB left free on the MSI for
     # bge-m3 (peer-reserve-mib). Measured (strata/ab/bench.py, Basalt 463d92e): prefill
     # 901 / 1,811 / 3,805 / 4,005 tok/s at 1K / 4K / 16K / 32K; decode code 197, prose 150,
     # explain 156, 20K agent 151; Basalt 0.2.1 (bbf2f5b) the same within noise: 949 / 1,799 /
