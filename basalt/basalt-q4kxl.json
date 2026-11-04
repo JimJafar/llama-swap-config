@@ -8,7 +8,8 @@
     "allowed-host": [
       ".akita-betelgeuse.ts.net",
       "marvin"
-    ]
+    ],
+    "vision": "dynamic"
   },
   "engine": {
     "max-context": 262144,
