@@ -88,9 +88,8 @@ hooks:
       # Qwen3.5-4B, chatterbox-turbo) are no longer preloaded, and are hidden: Jim moved
       # to a commercial product. Their entries are kept and load on demand by name.
       # h2o-lightning-4b (System 1, behind h2o-shim) is on demand too, but stays listed.
-      # bge-m3 (markdown-rag) stays: it serves embeddings only, so its chat warm-up fails
-      # (logged), but the model loads and stays.
-      - bge-m3
+      # bge-m3 was preloaded for markdown-rag until 2026-11-04, when markdown-rag was retired
+      # (the-archivist replaced it); it now loads only on request.
 
 # Qwen 3.5/3.6/3.8 jinja template fix
 #
@@ -321,12 +320,14 @@ models:
     # the IQ4_NL table): top-1 92.6%, KLD 0.050, against IQ3_S's 87.6% / 0.150.
     # Engine config basalt/basalt-q4kxl.json: 256K context, int8 KV, 75.5 GB of experts
     # pinned in RAM, the n-gram table read from the SSD (--ple-io direct: no RAM; locked in
-    # RAM, 53 GB with memlock raised, it measured the same within noise), 2 GiB left free on the MSI for
-    # bge-m3 (peer-reserve-mib). Measured (strata/ab/bench.py, Basalt 463d92e): prefill
+    # RAM, 53 GB with memlock raised, it measured the same within noise). The MSI left 2 GiB
+    # free for bge-m3 (peer-reserve-mib) until markdown-rag was retired on 2026-11-04.
+    # Measured (strata/ab/bench.py, Basalt 463d92e): prefill
     # 901 / 1,811 / 3,805 / 4,005 tok/s at 1K / 4K / 16K / 32K; decode code 197, prose 150,
     # explain 156, 20K agent 151; Basalt 0.2.1 (bbf2f5b) the same within noise: 949 / 1,799 /
     # 3,801 / 4,006 and 190 / 147 / 156 / 154 (IQ3_S on the 5070 Ti alone: 1,323-4,489 and
-    # 190 / 155 / 153 / 148).
+    # 190 / 155 / 153 / 148). Without the bge-m3 reserve (MSI experts 12.1 -> 14.4 GiB):
+    # prefill the same, decode 203 / 155 / 158 / 158.
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-q4kxl
@@ -1299,6 +1300,8 @@ models:
     # The index was embedded with exactly this GGUF and these flags: changing
     # either means re-embedding all ~41K chunks (about 10 minutes).
   bge-m3:
+    # NO CALLERS since 2026-11-04: markdown-rag (its only client) was retired. On demand only,
+    # and it can't load while Basalt-Q4KXL holds the MSI.
     # MSI 5060 Ti since 2026-10-30 (was the ZOTAC, which is out of the machine; both are free
     # now that the voice stack is gone).
     unlisted: true
@@ -1848,8 +1851,8 @@ groups:
       # h2o-lightning-4b (2026-10-09, replaced clef-flash): the System 1 model
       # on the ZOTAC. Preloaded since 2026-10-13, so it is always loaded.
       - h2o-lightning-4b
-      # bge-m3 (2026-10-10): markdown-rag's embeddings, ZOTAC, ~0.9 GiB. Preloaded
-      # since 2026-10-13, so it is always loaded.
+      # bge-m3 (2026-10-10): was markdown-rag's embeddings; no callers since markdown-rag
+      # was retired on 2026-11-04, so no longer preloaded. Stays here, on demand.
       - bge-m3
       # Qwen3.5-4B (2026-10-13, replaced LFM2.5-2.6B): `voice-agent`, alexa-marvin's
       # brain, ZOTAC, ~4.2 GiB with MTP. Preloaded, so the first wake word answers at once.

@@ -16,7 +16,6 @@
     "resident-experts": true,
     "expert-cache": "auto",
     "prefill": "auto",
-    "ple-io": "ram",
-    "peer-reserve-mib": 2048
+    "ple-io": "ram"
   }
 }
