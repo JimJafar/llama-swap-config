@@ -1,0 +1,22 @@
+{
+  "server": {
+    "model": "/home/jim/lab/models/Qwen3.8-FN-UD-Q4_K_XL-Q8table.basalt",
+    "alias": "qwen3.8-flash-next-q4kxl",
+    "gpu": "0,1",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "allowed-host": [
+      ".akita-betelgeuse.ts.net",
+      "marvin"
+    ]
+  },
+  "engine": {
+    "max-context": 262144,
+    "kv": "int8",
+    "resident-experts": true,
+    "expert-cache": "auto",
+    "prefill": "auto",
+    "ple-io": "direct",
+    "peer-reserve-mib": 2048
+  }
+}

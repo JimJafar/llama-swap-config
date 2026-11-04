@@ -81,8 +81,9 @@ hooks:
       # 2026-10-03: Strata-IQ3S while Jim evaluates it (it holds `subagent`); it is
       # persistent in its own group, so it coexists with the voice models the same way.
       # 2026-11-01: the default pair replaced Strata: Basalt-QFN (`subagent`) and maya-glm.
-      - Basalt-QFN
-      - maya-glm
+      # 2026-11-04: Basalt-Q4KXL alone (`subagent`), on both Blackwell cards; GLM and
+      # DeepSeek load on demand and take every card.
+      - Basalt-Q4KXL
       # 2026-10-30: the dictation and voice-assistant models (whisper-npu-asr, s1-mini,
       # Qwen3.5-4B, chatterbox-turbo) are no longer preloaded, and are hidden: Jim moved
       # to a commercial product. Their entries are kept and load on demand by name.
@@ -292,7 +293,8 @@ models:
     cmdStop: docker stop q9b-charvest
 
   Basalt-QFN:
-    # Qwen3.8-Flash-Next GSQ-RCO IQ3_S on Basalt (2026-11-01), the 5070 Ti alone: the
+    # ON DEMAND since 2026-11-04 (Basalt-Q4KXL took `subagent` and the default slot).
+    # Qwen3.8-Flash-Next GSQ-RCO IQ3_S on Basalt (2026-11-01), the 5070 Ti alone: was the
     # default `subagent`, and half of the default pair with maya-glm on the 3090 + MSI
     # ("pair" group). Basalt (github.com/jesdga95/basalt, a Strata fork for Blackwell
     # cards) is built in ~/lab/basalt; its pack is /mnt/data/models/Qwen3.8-FN-Basalt
@@ -306,7 +308,31 @@ models:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-basalt
-    cmd: /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-qfn.json GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+    cmd: >-
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL
+      /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-qfn.json GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+  Basalt-Q4KXL:
+    # THE DEFAULT (2026-11-04): Qwen3.8-Flash-Next UD-Q4_K_XL with the Q8_0 n-gram table on
+    # Basalt, the 5070 Ti main + the MSI 5060 Ti as expert tier ("basalt" group, preloaded).
+    # Pack ~/lab/models/Qwen3.8-FN-UD-Q4_K_XL-Q8table.basalt (140.9 GB), built from Unsloth's
+    # GGUF (revision d962011: shards 1-3 + engram/Qwen3.8-Flash-Next-engram-Q8_0 stamped as
+    # shard 4 with set_split.py) by convert.py --compat-bf16 --sections-from the IQ3_S pack
+    # (its self-distilled drafter and vision). Quality (Basalt's published UD-Q4_K_XL, with
+    # the IQ4_NL table): top-1 92.6%, KLD 0.050, against IQ3_S's 87.6% / 0.150.
+    # Engine config basalt/basalt-q4kxl.json: 256K context, int8 KV, 75.5 GB of experts
+    # pinned in RAM, the n-gram table read from the SSD (--ple-io direct: no RAM; locking it
+    # in RAM measured no faster, partly: memlock was 8 MB), 2 GiB left free on the MSI for
+    # bge-m3 (peer-reserve-mib). Measured (strata/ab/bench.py, Basalt 463d92e): prefill
+    # 901 / 1,811 / 3,805 / 4,005 tok/s at 1K / 4K / 16K / 32K; decode code 197, prose 150,
+    # explain 156, 20K agent 151; Basalt 0.2.1 (bbf2f5b) the same within noise: 949 / 1,799 /
+    # 3,801 / 4,006 and 190 / 147 / 156 / 154 (IQ3_S on the 5070 Ti alone: 1,323-4,489 and
+    # 190 / 155 / 153 / 148).
+    checkEndpoint: /health
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: qwen3.8-flash-next-q4kxl
+    cmd: >-
+      /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl.json
+      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
     # `subagent` (the factory builder role, the librarian curator) moved here from Strata.
     aliases: [subagent]
     filters:
@@ -324,6 +350,17 @@ models:
       setParamsByID:
         "subagent-voice":
           reasoning_effort: none
+
+  Basalt-Q4KXL-ram:
+    # TEST (2026-11-04): Basalt-Q4KXL with the n-gram table locked in RAM (--ple-io ram,
+    # 54.4 GB). Needs a memlock limit above the table (pm2-jim.service LimitMEMLOCK).
+    checkEndpoint: /health
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: qwen3.8-flash-next-q4kxl
+    cmd: >-
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL
+      /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl-ram.json
+      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
 
   Strata-IQ3S:
     # THE ONE STRATA since 2026-10-12, when Strata-IQ3XXS (its comparison since
@@ -355,7 +392,7 @@ models:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-iq3_s
-    cmd: /home/jim/llama-swap/strata/free-models.sh Basalt-QFN,maya-glm /home/jim/llama-swap/strata/run-strata.sh ${PORT} /home/jim/llama-swap/strata/strata-iq3_s.json
+    cmd: /home/jim/llama-swap/strata/free-models.sh Basalt-QFN,Basalt-Q4KXL,maya-glm /home/jim/llama-swap/strata/run-strata.sh ${PORT} /home/jim/llama-swap/strata/strata-iq3_s.json
     # 2026-11-01: ON DEMAND ONLY. `subagent` and the preload moved to Basalt-QFN (same
     # IQ3_S weights; Basalt is faster on the 5070 Ti alone than Strata on the 3090 + 5070 Ti,
     # and exact: Strata skips some low-ranked experts by default, STRATA_ROUTE_TAIL_SKIP=7).
@@ -384,7 +421,7 @@ models:
     # deleted 2026-10-06; the model file is gone too. Config kept for A/B reference.
     unlisted: true
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name qwen38-flash-q20 --runtime nvidia --ipc=host
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name qwen38-flash-q20 --runtime nvidia --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
@@ -486,7 +523,7 @@ models:
     # froggeric/Qwen-Fixed-Chat-Templates for a Qwen3.8 update.
   Q3.8-27B-Q6KM:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # GPU re-pin (2026-09-09): moved OFF the 5060 Ti (57bbb375, 16 GiB) onto the
       # 3090 (93ab52e5, 24 GiB). CUDA0 = 3090 = --main-gpu 0, CUDA1 = 5070 Ti
@@ -614,7 +651,7 @@ models:
   # MUST stay in the `qwen38-workload` group or it will not swap.
   Hemmingway:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -713,7 +750,7 @@ models:
   # first (switch-profile.sh) -- this entry cannot evict a persistent group.
   Swift-1.5-27B-Q6KS:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
       # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
@@ -812,7 +849,7 @@ models:
     # Xorg/compositor). See inline probe notes.
   Q3.8-27B-IQ4XS:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name q38iq4xsmtptp --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # GPU re-pin (2026-09-08): the 5070 Ti (d64df8cf, 16 GiB @ 03:00.0) is back in
       # the box, so this pair moves OFF the 5060 Ti (57bbb375, 16 GiB @ 01:00.0) onto
@@ -948,7 +985,7 @@ models:
     # so it remains the performance comparison point.
   Q3.8-27B-IQ4XS-DF2:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name q38iq4xsdflash2tp --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name q38iq4xsdflash2tp --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # Same 2-card UUID pinning as the MTP sibling (MSI 5060 Ti first = device0).
       -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
@@ -1037,7 +1074,7 @@ models:
     # Keep --spec-type draft-dflash. Depth 3 is the measured optimum for this drafter.
   muse-glimmer-30B-dflash-vision:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server
@@ -1084,7 +1121,7 @@ models:
     # with `-devd CUDA1`.
   gemma-4-31B-Q4-MTP:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
@@ -1681,9 +1718,11 @@ models:
     checkEndpoint: /v1/models
     proxy: http://127.0.0.1:${PORT}
     useModelName: glm-5.3-flash
+    # 2026-11-04: on demand, every card again (Basalt-Q4KXL is the default; this unloads it).
     cmd: >-
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-maya-l.json --max-context 262144
-      GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
   maya-deepseek:
     # DeepSeek-V4.1-Flash-1017, Maya-S (~178 GB of weights + 161 GB Engram tables in
     # /mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF), 256K context (32K until 2026-10-31),
@@ -1692,7 +1731,7 @@ models:
     proxy: http://127.0.0.1:${PORT}
     useModelName: deepseek-v4.1-flash
     cmd: >-
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,maya-glm
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
 
@@ -1706,24 +1745,21 @@ groups:
     # Strata request evicts them.
     members:
       - maya-deepseek
-  "pair":
-    # THE DEFAULT SETUP (2026-11-01): Basalt-QFN (Qwen3.8-Flash-Next, the 5070 Ti) and
-    # maya-glm (GLM-5.3-Flash, the 3090 + MSI 5060 Ti), loaded together at startup.
-    #   swap:false       -> both stay loaded side by side.
-    #   exclusive:true   -> loading either evicts the non-persistent models (a 27B,
-    #                       Strata, DeepSeek) that hold their cards.
-    #   persistent:true  -> nothing evicts them. Entries that need their cards (the 27Bs,
-    #                       Q3.8-FN, muse-glimmer, gemma-31B, Strata, DeepSeek) unload them
-    #                       first with strata/free-models.sh; they come back on their next
-    #                       request. Models on the MSI alone (gemma-26b, the curator
-    #                       entries, qwen3-embedding) don't fit beside GLM and can't load
-    #                       while it is up.
+      - maya-glm
+  "basalt":
+    # THE DEFAULT SETUP (2026-11-04): Basalt-Q4KXL on the 5070 Ti + MSI 5060 Ti, preloaded.
+    #   exclusive:true   -> loading it evicts the non-persistent models holding its cards
+    #                       (Strata, the 27Bs, GLM, DeepSeek).
+    #   persistent:true  -> nothing evicts it. Entries that need its cards (GLM, DeepSeek,
+    #                       the 27Bs, Q3.8-FN, muse-glimmer, gemma-31B, Strata, Basalt-QFN)
+    #                       unload it first with strata/free-models.sh; it comes back on its
+    #                       next request. Replaced the "pair" group (Basalt-QFN + maya-glm,
+    #                       2026-11-01 to 2026-11-04).
     swap: false
     exclusive: true
     persistent: true
     members:
-      - Basalt-QFN
-      - maya-glm
+      - Basalt-Q4KXL
   "gemma-26b":
     swap: true
     exclusive: false
@@ -1818,6 +1854,14 @@ groups:
       # Qwen3.5-4B (2026-10-13, replaced LFM2.5-2.6B): `voice-agent`, alexa-marvin's
       # brain, ZOTAC, ~4.2 GiB with MTP. Preloaded, so the first wake word answers at once.
       - Qwen3.5-4B
+  "basalt-alt":
+    # The other Basalt setups, on demand: each unloads Basalt-Q4KXL first (free-models.sh).
+    swap: true
+    exclusive: true
+    persistent: false
+    members:
+      - Basalt-QFN
+      - Basalt-Q4KXL-ram
   "strata-iq3s":
     swap: true
     exclusive: true
