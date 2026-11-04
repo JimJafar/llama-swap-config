@@ -1,8 +1,8 @@
 # LiteLLM gateway: llama-swap with Opik tracing
 
 An OpenAI-compatible gateway on **port 8034** that forwards every request to llama-swap
-(`127.0.0.1:8033`) and logs it to [Opik](http://colin.akita-betelgeuse.ts.net:5173)
-on Colin. llama-swap itself is unchanged: only agents pointed at 8034 are traced,
+(`127.0.0.1:8033`) and logs it to [Opik](http://ssd-nodes.akita-betelgeuse.ts.net:5173)
+on the ssd-nodes VPS. llama-swap itself is unchanged: only agents pointed at 8034 are traced,
 so benchmarks and scripts that use 8033 stay out of Opik.
 
 | | Address |
