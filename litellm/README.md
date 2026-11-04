@@ -22,7 +22,7 @@ so `opik-hermes` logs to `hermes`. Any other key, or none, is accepted and logs 
 - Chat completions, streamed or not, with tool calls, reasoning and token counts. Audio
   and the rest are logged too.
 - **Not embeddings** (`tracing.py`). They are the input text plus a vector, which is useless
-  for evals, and the librarian and archivist send a lot of them.
+  for evals, and an indexer re-embedding a vault would flood a project with them.
 - Extra parameters (`chat_template_kwargs`, `top_k`, ...) are passed through to llama-swap
   unchanged.
 - Overhead: none measurable (median ~0.04 s per 1-token request either way, 2026-11-02).

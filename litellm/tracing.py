@@ -1,7 +1,7 @@
 """LiteLLM's Opik logger, minus embeddings.
 
 An embedding trace is the input text and a 1024-number vector: no use for evals, and
-the librarian and archivist make a lot of them. Chat, audio and everything else is logged.
+an indexer would make a lot of them. Chat, audio and everything else is logged.
 """
 from litellm.integrations.opik.opik import OpikLogger
 
