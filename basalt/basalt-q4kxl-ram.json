@@ -9,7 +9,8 @@
       ".akita-betelgeuse.ts.net",
       "marvin"
     ],
-    "vision": "dynamic"
+    "vision": "dynamic",
+    "fit-max-tokens": true
   },
   "engine": {
     "max-context": 262144,
