@@ -1803,6 +1803,33 @@ models:
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
 
+  maya-glm-zt:
+    # TEST (2026-11-06): GLM-5.3-Flash (Maya-L) on the 3090 + ZOTAC 5060 Ti only, BESIDE Basalt-Q4KXL
+    # (no free-models.sh for Basalt; group "beside-basalt", so it swaps with the other
+    # models on these two cards). run-maya.sh writes the cards into the shared config at start.
+    # Measured (bench/llm_bench.py, Maya 1.1.56, Basalt idle): 29.1 tok/s short decode,
+    # 911 tok/s reading 29K, 28.4 decode after it; images on. RAM ~30 GB left with Basalt.
+    checkEndpoint: /v1/models
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: glm-5.3-flash
+    cmd: >-
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-maya-l.json --max-context 262144
+      GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+
+  maya-deepseek-zt:
+    # TEST (2026-11-06): DeepSeek-V4.1-Flash (Maya-S) on the 3090 + ZOTAC 5060 Ti only, BESIDE Basalt-Q4KXL
+    # (no free-models.sh for Basalt; group "beside-basalt", so it swaps with the other
+    # models on these two cards). run-maya.sh writes the cards into the shared config at start.
+    # Measured (bench/llm_bench.py, Maya 1.1.56, Basalt idle): 25.6 tok/s short decode,
+    # 303 tok/s reading 29K (97 s to first token), 24.9 decode after it; images on. The cards
+    # hold 28 GB of experts, the CPU runs ~77% (148 GB read through the page cache).
+    checkEndpoint: /v1/models
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: deepseek-v4.1-flash
+    cmd: >-
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
+      GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+
 groups:
   "maya":
     swap: true
@@ -1930,6 +1957,8 @@ groups:
     persistent: false
     members:
       - Q3.8-27B-Q6KM-ZT
+      - maya-glm-zt
+      - maya-deepseek-zt
   "basalt-alt":
     # The other Basalt setups, on demand: each unloads Basalt-Q4KXL first (free-models.sh).
     swap: true
