@@ -312,7 +312,7 @@ models:
       /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-qfn.json GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
   Basalt-Q4KXL:
     # THE DEFAULT (2026-11-04): Qwen3.8-Flash-Next UD-Q4_K_XL with the Q8_0 n-gram table on
-    # Basalt, the 5070 Ti main + the MSI 5060 Ti as expert tier ("basalt" group, preloaded).
+    # Basalt, the 5070 Ti main + both 5060 Tis as expert tiers ("basalt" group, preloaded).
     # Pack ~/lab/models/Qwen3.8-FN-UD-Q4_K_XL-Q8table.basalt (140.9 GB), built from Unsloth's
     # GGUF (revision d962011: shards 1-3 + engram/Qwen3.8-Flash-Next-engram-Q8_0 stamped as
     # shard 4 with set_split.py) by convert.py --compat-bf16 --sections-from the IQ3_S pack
@@ -328,12 +328,17 @@ models:
     # 3,801 / 4,006 and 190 / 147 / 156 / 154 (IQ3_S on the 5070 Ti alone: 1,323-4,489 and
     # 190 / 155 / 153 / 148). Without the bge-m3 reserve (MSI experts 12.1 -> 14.4 GiB):
     # prefill the same, decode 203 / 155 / 158 / 158.
+    # THREE CARDS (2026-11-06): the ZOTAC 5060 Ti back in the machine as a second expert tier
+    # (14.4 GiB of experts on the MSI, 14.7 on the ZOTAC; the voice models that used to live on
+    # it are on demand since 2026-10-30 and would not fit beside Basalt now). Measured: prefill
+    # 896 / 1,795 / 3,790 / 4,004 (unchanged: no prompt split across the cards), decode 216 /
+    # 157 / 175 / 165 (code +6%, prose +1%, explain +10%, agent +4%).
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-q4kxl
     cmd: >-
       /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl.json
-      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
     # `subagent` (the factory builder role, the librarian curator) moved here from Strata.
     aliases: [subagent]
     filters:
@@ -361,7 +366,7 @@ models:
     cmd: >-
       /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL
       /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl-ram.json
-      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
+      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
 
   Strata-IQ3S:
     # THE ONE STRATA since 2026-10-12, when Strata-IQ3XXS (its comparison since
