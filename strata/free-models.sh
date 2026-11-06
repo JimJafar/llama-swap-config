@@ -27,6 +27,9 @@ done
 # llama-swap drops a model from /running before its engine has exited and freed the VRAM
 # (the first 27B start after this script went in failed that way), so also wait for the
 # engines' own processes. The [x] patterns can't match this script's own command line.
+# FREE_MODELS_NO_ENGINE_WAIT=1 (Basalt-Q4KXL, 2026-11-06): the models it frees are llama.cpp
+# containers, and the engines this loop waits for (GLM on the other two cards) are not in its way.
+[ -n "${FREE_MODELS_NO_ENGINE_WAIT:-}" ] && i=120
 while [ $i -lt 120 ] && pgrep -f '[S]trata/engine/strata --serve|[b]in/basalt --serve|[b]uild/maya --serve|[b]uild/maya ' >/dev/null; do
     sleep 1; i=$((i + 1))
 done

@@ -323,7 +323,14 @@ models:
     checkEndpoint: /health
     proxy: http://127.0.0.1:${PORT}
     useModelName: qwen3.8-flash-next-q4kxl
+    # NOT EXCLUSIVE (2026-11-06): llama-swap applies a group's `exclusive` on every request to a
+    # member, so it unloaded the non-persistent maya-glm on each Basalt request. Instead Basalt
+    # unloads the models that use its cards itself when it starts (free-models.sh, without
+    # the wait for other engines: GLM runs on the other two cards).
+    env:
+      - FREE_MODELS_NO_ENGINE_WAIT=1
     cmd: >-
+      /home/jim/llama-swap/strata/free-models.sh bge-m3,curator-grooming,curator-harvesting,gemma-26b-fast,gemma-4-26B-MoE-MTP,gemma-4-31B-Q4-MTP,Hemmingway,muse-glimmer-30B-dflash-vision,Swift-1.5-27B-Q6KS
       /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl.json
       GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
     # `subagent` (the factory builder role, the librarian curator) moved here from Strata.
@@ -1433,15 +1440,16 @@ models:
 groups:
   "basalt":
     # THE DEFAULT SETUP (2026-11-04): Basalt-Q4KXL on the 5070 Ti + MSI 5060 Ti, preloaded.
-    #   exclusive:true   -> loading it evicts the non-persistent models holding its cards
-    #                       (Strata, the 27Bs, GLM, DeepSeek).
+    #   exclusive:false  -> (true until 2026-11-06) llama-swap applies exclusive on EVERY
+    #                       request to a member, which unloaded the non-persistent maya-glm on
+    #                       each Basalt request. Basalt's cmd unloads the models on its cards.
     #   persistent:true  -> nothing evicts it. Entries that need its cards (GLM, DeepSeek,
     #                       the 27Bs, Q3.8-FN, muse-glimmer, gemma-31B, Strata, Basalt-QFN)
     #                       unload it first with strata/free-models.sh; it comes back on its
     #                       next request. Replaced the "pair" group (Basalt-QFN + maya-glm,
     #                       2026-11-01 to 2026-11-04).
     swap: false
-    exclusive: true
+    exclusive: false
     persistent: true
     members:
       - Basalt-Q4KXL
