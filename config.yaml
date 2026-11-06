@@ -84,6 +84,8 @@ hooks:
       # 2026-11-04: Basalt-Q4KXL alone (`subagent`), on both Blackwell cards; GLM and
       # DeepSeek load on demand and take every card.
       - Basalt-Q4KXL
+      # 2026-11-06: and maya-glm, GLM on the 3090 + ZOTAC beside it (the default pair again).
+      - maya-glm
       # 2026-10-30: the dictation and voice-assistant models (whisper-npu-asr, s1-mini,
       # Qwen3.5-4B, chatterbox-turbo) are no longer preloaded, and are hidden: Jim moved
       # to a commercial product. Their entries are kept and load on demand by name.
@@ -535,7 +537,7 @@ models:
     # prefill 1,012 / 1,233 / 1,237 / 1,176 tok/s at 1K / 4K / 16K / 32K; decode code 92,
     # prose 65, explain 72, 20K agent 103 (wide spread between reps: MTP + n-gram drafting).
     cmd: |
-      docker run --rm --name q38-27b-zt --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh maya-glm docker run --rm --name q38-27b-zt --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -1140,7 +1142,7 @@ models:
     # Keep --spec-type draft-dflash. Depth 3 is the measured optimum for this drafter.
   muse-glimmer-30B-dflash-vision:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server
@@ -1187,7 +1189,7 @@ models:
     # with `-devd CUDA1`.
   gemma-4-31B-Q4-MTP:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL docker run --rm --name g31mtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
       -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
       -p ${PORT}:8080 -v /mnt/data/models:/models
       --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
@@ -1775,7 +1777,7 @@ models:
   # nvidia-smi numbers (skipping cards that aren't installed), unloads Strata (Maya needs
   # every card), then runs Maya's server. Maya pins most of the free RAM while loaded.
   # Each split lists the cards in the order Maya's setup chose them.
-  maya-glm:
+  maya-glm-4gpu:
     # GLM-5.3-Flash, Maya-L (IQ3_S, ~156 GB of weights in /mnt/data/models/Maya-L), 256K
     # context (32K until 2026-10-31: a long thinking answer filled it), MTP drafting. Benchmarks: hardware-upgrade-benchmarks.md (Maya section).
     # 2026-11-01: the 3090 + MSI 5060 Ti only (was every card), half of the default pair with
@@ -1787,8 +1789,10 @@ models:
     proxy: http://127.0.0.1:${PORT}
     useModelName: glm-5.3-flash
     # 2026-11-04: on demand, every card again (Basalt-Q4KXL is the default; this unloads it).
+    # 2026-11-06: renamed maya-glm-4gpu; `maya-glm` is now the default on the 3090 + ZOTAC,
+    # which this unloads too.
     cmd: >-
-      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL
+      /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-maya-l.json --max-context 262144
       GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
   maya-deepseek:
@@ -1803,10 +1807,12 @@ models:
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-57bbb375-a61a-6662-e9c8-447b948f0833 GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
 
-  maya-glm-zt:
-    # TEST (2026-11-06): GLM-5.3-Flash (Maya-L) on the 3090 + ZOTAC 5060 Ti only, BESIDE Basalt-Q4KXL
-    # (no free-models.sh for Basalt; group "beside-basalt", so it swaps with the other
-    # models on these two cards). run-maya.sh writes the cards into the shared config at start.
+  maya-glm:
+    # THE DEFAULT GLM (2026-11-06; maya-glm-zt while it was tested): GLM-5.3-Flash (Maya-L)
+    # on the 3090 + ZOTAC 5060 Ti, beside Basalt-Q4KXL on the other two cards. Preloaded and
+    # persistent (group "basalt"); the models that need the 3090 or ZOTAC unload it first
+    # (free-models.sh). The every-card version is maya-glm-4gpu. run-maya.sh writes the
+    # cards into the shared config (maya-maya-l.json) at each start.
     # Measured (bench/llm_bench.py, Maya 1.1.56, Basalt idle): 29.1 tok/s short decode,
     # 911 tok/s reading 29K, 28.4 decode after it; images on. RAM ~30 GB left with Basalt.
     checkEndpoint: /v1/models
@@ -1827,6 +1833,7 @@ models:
     proxy: http://127.0.0.1:${PORT}
     useModelName: deepseek-v4.1-flash
     cmd: >-
+      /home/jim/llama-swap/strata/free-models.sh maya-glm
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
 
@@ -1840,7 +1847,7 @@ groups:
     # Strata request evicts them.
     members:
       - maya-deepseek
-      - maya-glm
+      - maya-glm-4gpu
   "basalt":
     # THE DEFAULT SETUP (2026-11-04): Basalt-Q4KXL on the 5070 Ti + MSI 5060 Ti, preloaded.
     #   exclusive:true   -> loading it evicts the non-persistent models holding its cards
@@ -1855,6 +1862,8 @@ groups:
     persistent: true
     members:
       - Basalt-Q4KXL
+      # maya-glm (2026-11-06): GLM on the 3090 + ZOTAC, the default beside Basalt.
+      - maya-glm
   "gemma-26b":
     swap: true
     exclusive: false
@@ -1950,14 +1959,13 @@ groups:
       # brain, ZOTAC, ~4.2 GiB with MTP. Preloaded, so the first wake word answers at once.
       - Qwen3.5-4B
   "beside-basalt":
-    # Models on the 3090 + ZOTAC (2026-11-06), the cards Basalt-Q4KXL leaves free: they load
-    # without unloading anything else.
+    # Models on the 3090 + ZOTAC (2026-11-06), the cards Basalt-Q4KXL leaves free. They leave
+    # Basalt loaded and unload the default GLM (maya-glm) first.
     swap: true
     exclusive: false
     persistent: false
     members:
       - Q3.8-27B-Q6KM-ZT
-      - maya-glm-zt
       - maya-deepseek-zt
   "basalt-alt":
     # The other Basalt setups, on demand: each unloads Basalt-Q4KXL first (free-models.sh).
