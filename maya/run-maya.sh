@@ -65,7 +65,11 @@ while pgrep -f "Strata/engine/strata --serve" >/dev/null && [ $i -lt 60 ]; do sl
 # On a config reload llama-swap starts this before the previous Maya engine has exited and
 # freed its cards (2026-11-01: the reloaded pair failed to start); wait up to 60 s more.
 i=0
-while pgrep -f '[b]uild/maya --serve|[b]uild/maya-ds4 ' >/dev/null && [ $i -lt 60 ]; do sleep 1; i=$((i + 1)); done
+while pgrep -f '[b]uild/maya --serve|[b]uild/maya-ds4 ' >/dev/null && [ $i -lt 120 ]; do sleep 1; i=$((i + 1)); done
+# 2026-11-06: and for the old server to let go of the port. On a reload llama-swap reuses the
+# port, and Maya's server outlives its engine by a few seconds ("port 5915 is already in use").
+i=0
+while ss -Htln "sport = :$PORT" | grep -q . && [ $i -lt 60 ]; do sleep 1; i=$((i + 1)); done
 
 cd "$MAYA"
 exec "$MAYA/.venv/bin/python" "$MAYA/maya.py" --config "$CONFIG" --port "$PORT"

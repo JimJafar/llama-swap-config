@@ -481,7 +481,7 @@ models:
     # prefill 1,012 / 1,233 / 1,237 / 1,176 tok/s at 1K / 4K / 16K / 32K; decode code 92,
     # prose 65, explain 72, 20K agent 103 (wide spread between reps: MTP + n-gram drafting).
     cmd: |
-      docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -579,7 +579,7 @@ models:
   # MUST stay in the `qwen38-workload` group or it will not swap.
   Hemmingway:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -678,7 +678,7 @@ models:
   # first (switch-profile.sh) -- this entry cannot evict a persistent group.
   Swift-1.5-27B-Q6KS:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
       # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
@@ -1419,6 +1419,7 @@ models:
     proxy: http://127.0.0.1:${PORT}
     useModelName: glm-5.3-flash
     cmd: >-
+      /home/jim/llama-swap/maya/free-comfyui.sh
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-maya-l.json --max-context 262144
       GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
 
@@ -1434,6 +1435,7 @@ models:
     proxy: http://127.0.0.1:${PORT}
     useModelName: deepseek-v4.1-flash
     cmd: >-
+      /home/jim/llama-swap/maya/free-comfyui.sh
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
 
