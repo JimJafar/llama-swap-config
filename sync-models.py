@@ -74,13 +74,14 @@ CONTEXT_OVERRIDES: dict[str, int] = {}
 # hard-coded 65536 went stale when Swift moved to 262144 on 2026-09-30).
 STRATA_CONFIGS: dict[str, Path] = {
     # 2026-10-12: Marvin's tuned configs in strata/ (official Strata 0.1.43; the fork is retired)
-    "Strata-IQ3S": Path(__file__).resolve().parent / "strata" / "strata-iq3_s.json",
+    # 2026-11-06: none (Strata-IQ3S and its config were removed).
 }
 
 
-# Basalt (2026-11-01): the same idea; its JSON config has "engine": {"max-context": N}.
+# Basalt (2026-11-01): the same idea. Basalt 0.3's v2 config has the context in its model
+# entry ("models": [{"max-context": N}]), the v1 one in "engine".
 BASALT_CONFIGS: dict[str, Path] = {
-    "Basalt-QFN": Path(__file__).resolve().parent / "basalt" / "basalt-qfn.json",
+    "Basalt-Q4KXL": Path(__file__).resolve().parent / "basalt" / "basalt-q4kxl.json",
 }
 
 
@@ -88,7 +89,9 @@ def strata_context(model_id: str) -> int | None:
     bpath = BASALT_CONFIGS.get(model_id)
     if bpath is not None:
         try:
-            return int(json.loads(bpath.read_text())["engine"]["max-context"])
+            c = json.loads(bpath.read_text())
+            m = (c.get("models") or [{}])[0]
+            return int(m.get("max-context") or c["engine"]["max-context"])
         except (OSError, KeyError, ValueError, TypeError):
             return None
     path = STRATA_CONFIGS.get(model_id)

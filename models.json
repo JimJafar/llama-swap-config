@@ -29,30 +29,7 @@
           }
         },
         {
-          "id": "Basalt-QFN",
-          "input": [
-            "text",
-            "image"
-          ],
-          "contextWindow": 262144,
-          "maxTokens": 249036,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "off": "off",
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": null,
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "supportsDeveloperRole": false,
-            "thinkingFormat": "openai"
-          }
-        },
-        {
-          "id": "Strata-IQ3S",
+          "id": "Basalt-Q4KXL",
           "input": [
             "text",
             "image"
@@ -135,62 +112,6 @@
             "text"
           ],
           "id": "Swift-1.5-27B-Q6KS",
-          "contextWindow": 262144,
-          "maxTokens": 249036,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          }
-        },
-        {
-          "input": [
-            "text"
-          ],
-          "id": "Q3.8-27B-IQ4XS",
-          "contextWindow": 393216,
-          "maxTokens": 373555,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh",
-            "max": null
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "enable_thinking": {
-                "$var": "thinking.enabled"
-              },
-              "reasoning_effort": {
-                "$var": "thinking.effort"
-              }
-            }
-          }
-        },
-        {
-          "id": "Q3.8-27B-IQ4XS-DF2",
-          "input": [
-            "text"
-          ],
           "contextWindow": 262144,
           "maxTokens": 249036,
           "reasoning": true,
