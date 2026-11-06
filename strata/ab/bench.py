@@ -35,6 +35,9 @@ def wait_idle(timeout=900):
                 live = json.load(urllib.request.urlopen(f"http://127.0.0.1:{p}/metrics", timeout=10))["live"]
                 if live.get("state") == "idle" and not live.get("queued"):
                     return
+            except (ValueError, KeyError, urllib.error.HTTPError):
+                # llama-server: no Strata-style live state; requests here are sequential anyway.
+                return
             except Exception:
                 pass
         time.sleep(1)

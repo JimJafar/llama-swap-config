@@ -338,7 +338,7 @@ models:
     useModelName: qwen3.8-flash-next-q4kxl
     cmd: >-
       /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl.json
-      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
     # `subagent` (the factory builder role, the librarian curator) moved here from Strata.
     aliases: [subagent]
     filters:
@@ -366,7 +366,7 @@ models:
     cmd: >-
       /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL
       /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl-ram.json
-      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
 
   Strata-IQ3S:
     # THE ONE STRATA since 2026-10-12, when Strata-IQ3XXS (its comparison since
@@ -527,6 +527,66 @@ models:
     # Chat template: uses the shared Qwen 3.5/3.6 fixed template (Qwen3.8 inherits
     # the same template structure). If reasoning tags don't parse correctly, check
     # froggeric/Qwen-Fixed-Chat-Templates for a Qwen3.8 update.
+  Q3.8-27B-Q6KM-ZT:
+    # TEST (2026-11-06): Q3.8-27B-Q6KM on the 3090 + ZOTAC 5060 Ti, the pair Basalt-Q4KXL
+    # leaves free, so it runs BESIDE Basalt (no free-models.sh; group "beside-basalt").
+    # Same flags as Q3.8-27B-Q6KM (3090 + 5070 Ti).
+    # Measured (strata/ab/bench.py, temperature 0, reasoning off, alongside an idle Basalt):
+    # prefill 1,012 / 1,233 / 1,237 / 1,176 tok/s at 1K / 4K / 16K / 32K; decode code 92,
+    # prose 65, explain 72, 20K agent 103 (wide spread between reps: MTP + n-gram drafting).
+    cmd: |
+      docker run --rm --name q38-27b-zt --runtime nvidia --cap-add SYS_ADMIN
+      --ipc=host
+      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+      -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
+      -e LD_PRELOAD=/opt/newnccl/libnccl.so.2
+      -v /home/jim/llama-swap/vendor/libnccl.so.2.30.4:/opt/newnccl/libnccl.so.2:ro
+      -p ${PORT}:8080 -v /mnt/data/models:/models
+      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
+      -m /models/Qwen3.8-27B-UD-Q6_K_M.gguf
+      --mmproj /models/qwen3.8-mmproj-BF16.gguf
+
+      --jinja --chat-template-file /models/qwen_sharp_template_oneline.jinja
+      --chat-template-kwargs "{\"reasoning_effort\":\"medium\"}"
+
+      -ngl 99
+      --flash-attn on
+      -sm tensor
+      --fit off
+
+      -b 2048
+      -c 240000
+      -ctk q8_0
+      -ctv q8_0
+      --main-gpu 0
+      --tensor-split 1.00,0.70
+      -np 1
+      -ub 1024
+
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+
+      --reasoning-format deepseek
+      --reasoning-budget -1
+      --reasoning on
+      --reasoning-preserve
+
+      --spec-type draft-mtp,ngram-mod
+      -md /models/qwen3.8-mtp-Q4_0.gguf
+      --spec-draft-n-max 3
+      --spec-ngram-mod-n-match 24
+      --spec-ngram-mod-n-min 24
+      --spec-ngram-mod-n-max 86
+
+      --timeout 900
+      --host 0.0.0.0
+      --port 8080
+    cmdStop: docker stop q38-27b-zt
+
   Q3.8-27B-Q6KM:
     cmd: |
       /home/jim/llama-swap/strata/free-models.sh Strata-IQ3S,Basalt-QFN,Basalt-Q4KXL,maya-glm docker run --rm --name q38-27b --runtime nvidia --cap-add SYS_ADMIN
@@ -1862,6 +1922,14 @@ groups:
       # Qwen3.5-4B (2026-10-13, replaced LFM2.5-2.6B): `voice-agent`, alexa-marvin's
       # brain, ZOTAC, ~4.2 GiB with MTP. Preloaded, so the first wake word answers at once.
       - Qwen3.5-4B
+  "beside-basalt":
+    # Models on the 3090 + ZOTAC (2026-11-06), the cards Basalt-Q4KXL leaves free: they load
+    # without unloading anything else.
+    swap: true
+    exclusive: false
+    persistent: false
+    members:
+      - Q3.8-27B-Q6KM-ZT
   "basalt-alt":
     # The other Basalt setups, on demand: each unloads Basalt-Q4KXL first (free-models.sh).
     swap: true
