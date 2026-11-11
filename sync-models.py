@@ -30,6 +30,11 @@
 
 Then copies the result to ~/.pi/agent/models.json.
 
+Codex gets the same model list in Codex's own format:
+~/.codex/model-catalogs/marvin-models.json (see CODEX_CATALOG below). Without it Codex
+prints "Model metadata for `subagent` not found. Defaulting to fallback metadata" and runs
+the marvin models with a guessed context window, no reasoning levels and no instructions.
+
 Usage:  sync-models.py          # write + copy
         sync-models.py --dry-run  # print diff only
 """
@@ -38,6 +43,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -53,6 +59,41 @@ DEST = Path.home() / ".pi/agent/models.json"
 # all other settings are left alone. Local only -- not pushed to guybrush/ssdnodes.
 PI_SETTINGS = Path.home() / ".pi/agent/settings.json"
 PROVIDER_NAME = "marvin"
+
+# --- Codex -------------------------------------------------------------------
+# Codex has no per-provider model list: `model_catalog_json` points at ONE JSON file that
+# REPLACES the whole catalog (verified on 0.167: set it in config.toml and the gpt-6 models
+# vanish from the picker). So this file is meant to be referenced from the marvin PROFILE
+# (~/.codex/marvin.config.toml, `codex -p marvin`), not from the top of config.toml.
+# Required per entry: slug, display_name, default_reasoning_level, supported_reasoning_levels,
+# shell_type, visibility, supported_in_api, priority, support_verbosity, truncation_policy,
+# experimental_supported_tools, and base_instructions (or model_messages.instructions_template).
+# Unknown extra keys are ignored; omitted optional keys take the defaults Codex showed for
+# them, which are repeated here explicitly where the default is wrong for a local model.
+CODEX_HOME = Path.home() / ".codex"
+CODEX_CONFIG = CODEX_HOME / "config.toml"
+# Codex's new-style profile file: `codex -p marvin` layers this over config.toml. It used to be
+# a `[profiles.marvin]` table inside config.toml, and 0.167 REFUSES `-p marvin` while that legacy
+# table is still there ("--profile `marvin` cannot be used while ... contains legacy
+# `[profiles.marvin]` config"), so ensure_codex_profile() moves it out. Synced to every machine.
+CODEX_PROFILE = CODEX_HOME / "marvin.config.toml"
+CODEX_CATALOG = CODEX_HOME / "model-catalogs/marvin-models.json"
+# How Codex wants the path written: relative to CODEX_HOME, so one file works on all four boxes.
+CODEX_CATALOG_REL = "model-catalogs/marvin-models.json"
+# base_instructions is required, and Codex's own prompt for gpt-6 is ~19K of GPT/code-mode
+# specific text (JS `functions.exec` batching, Apps/Connectors, plugins, `commentary`/`final`
+# channels, persistent mode). Hand a 27B model that and you spend a fifth of its window on
+# instructions it cannot act on, so this is a distilled version: the parts that change behaviour
+# for any model (autonomy, permission, formatting, shell habits) and the tools these models
+# actually get (exec_command / write_stdin / view_image / skills). Edit the file, not the script.
+CODEX_INSTRUCTIONS = Path(__file__).resolve().parent / "codex/marvin-instructions.md"
+# Effort strings Codex's own UI/config understands. A model's levels are the intersection of
+# this with what its chat template accepts (the THINKING_WIRING spec), because Codex sends the
+# string through verbatim as `reasoning.effort` and templates such as Qwen3.8's RAISE on an
+# effort they do not know.
+CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+# Ids whose model takes images as well as text. Matched as a substring of the id.
+CODEX_IMAGE_INPUT_MARKERS = ("vision",)
 
 # Models in config.yaml that should NOT appear in models.json.
 # unlisted entries are skipped automatically; these are the rest.
@@ -141,6 +182,7 @@ THINKING_WIRING = [
     # (serve/frontend.py, v1.1.42). Both configs default to "high" (2026-10-31).
     {
         "marker": "maya-",
+        "label": "Maya",
         "defaultLevel": "high",
         "fields": {
             "reasoning": True,
@@ -169,6 +211,7 @@ THINKING_WIRING = [
     {
         "marker": ["q3.8", "qwen3.8"],
         "template": "qwen_sharp_template_oneline.jinja",
+        "label": "Qwen3.8",
         # pi's startup thinking level for every model this spec matches (see
         # PI_SETTINGS below). Optional; a spec without it leaves pi's global default.
         "defaultLevel": "medium",
@@ -191,6 +234,7 @@ THINKING_WIRING = [
     # (default false) and reasoning_effort none/low/high/max.
     {
         "marker": "deepseek",
+        "label": "DeepSeek",
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {
@@ -211,6 +255,7 @@ THINKING_WIRING = [
     # nothing server-side. Empty thinkingLevelMap = pi defaults (off allowed).
     {
         "marker": ["q3.5", "qwen3.5"],
+        "label": "Qwen3.5",
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {},
@@ -224,6 +269,7 @@ THINKING_WIRING = [
     },
     {
         "marker": ["q3.6", "qwen3.6"],
+        "label": "Qwen3.6",
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {},
@@ -238,6 +284,7 @@ THINKING_WIRING = [
     # Laguna: on/off only (template: enable_thinking default true, no effort).
     {
         "marker": "laguna",
+        "label": "Laguna",
         "fields": {
             "reasoning": True,
             "thinkingLevelMap": {},
@@ -262,6 +309,7 @@ THINKING_WIRING = [
         # 2026-11-01: Basalt (a Strata fork, Basalt-QFN = `subagent`) takes the same levels
         # (serve/frontend.py: none/low/medium/high->xhigh/xhigh) and the same OpenAI field.
         "marker": ["strata", "basalt"],
+        "label": "Basalt",
         "defaultLevel": "medium",   # Strata and Basalt serve Qwen3.8-Flash-Next models
         "fields": {
             "reasoning": True,
@@ -338,6 +386,218 @@ def max_tokens(ctx) -> int:
         return int(DEFAULT_CONTEXT_WINDOW * MAX_TOKENS_RATIO)
 
 
+# Where the generated files land on every machine, as (local file, path under its ~).
+SYNC_FILES = [
+    (OUT, ".pi/agent/models.json"),
+    (CODEX_CATALOG, ".codex/model-catalogs/marvin-models.json"),
+    (CODEX_PROFILE, ".codex/marvin.config.toml"),
+]
+# ssdnodes runs ssh on port 42; the others on the default.
+REMOTE_MACHINES = [
+    ("ssdnodes", "ssd-nodes.akita-betelgeuse.ts.net", 42),
+    ("guybrush", "guybrush.akita-betelgeuse.ts.net", None),
+    ("colin", "colin.akita-betelgeuse.ts.net", None),
+]
+
+
+def push() -> None:
+    """scp every SYNC_FILE to every REMOTE_MACHINE.
+
+    scp will not create a directory, so each remote directory is mkdir -p'd first (the
+    Codex one is new on most machines). BatchMode + ConnectTimeout keep a machine that is
+    off the tailnet from hanging the whole sync: it fails with a warning instead.
+    """
+    print("sending to " + ", ".join(name for name, _, _ in REMOTE_MACHINES))
+    for name, host, port in REMOTE_MACHINES:
+        base = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+        for local, rel in SYNC_FILES:
+            parent = rel.rsplit("/", 1)[0]
+            try:
+                subprocess.run(["ssh"] + base + (["-p", str(port)] if port else [])
+                               + [host, f"mkdir -p {parent}"],
+                               check=True, capture_output=True, timeout=60)
+                subprocess.run(["scp"] + base + (["-P", str(port)] if port else [])
+                               + [str(local), f"{host}:~/{rel}"],
+                               check=True, capture_output=True, timeout=120)
+                print(f"  {name}: ~/{rel}")
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                detail = ((e.stderr or b"").decode(errors="replace").strip().splitlines()
+                          if isinstance(e, subprocess.CalledProcessError) else ["timed out"])
+                print(f"  WARNING: {name}: ~/{rel} failed"
+                      f"{' (' + detail[-1][:160] + ')' if detail else ''}"
+                      f"; local files are written, copy manually")
+
+
+def codex_profile_text() -> str:
+    return f"""# `codex -p marvin` -- the llama-swap models on Marvin, written by ~/llama-swap/sync-models.py.
+# Edit the generator, not this file: every run rewrites it. Personal Codex settings stay in
+# config.toml -- this layer only sets what switching to Marvin actually means.
+#
+# model_catalog_json replaces the WHOLE catalog, so it belongs in this profile and never in the
+# top of config.toml (there it would hide the OpenAI models). Generated file, no hand edits.
+model = "subagent"
+model_provider = "marvin"
+model_catalog_json = "{CODEX_CATALOG_REL}"
+
+# Self-contained on purpose: guybrush, ssd-nodes and colin each carry a slightly different
+# marvin provider (or none), so the profile defines its own and every machine behaves the same.
+[model_providers.marvin]
+name = "Marvin"
+base_url = "{PROVIDER["baseUrl"]}"
+wire_api = "responses"
+"""
+
+
+def ensure_codex_profile() -> None:
+    """Write ~/.codex/marvin.config.toml and get any legacy [profiles.marvin] out of config.toml.
+
+    A missing catalog file is a HARD error for the profile, so the profile is written after the
+    catalog (push() delivers both to the other machines).
+    """
+    try:
+        CODEX_PROFILE.write_text(codex_profile_text())
+    except OSError as e:
+        sys.exit(f"error writing {CODEX_PROFILE}: {e}")
+    print(f"wrote {CODEX_PROFILE}")
+    try:
+        text = CODEX_CONFIG.read_text()
+    except OSError:
+        return
+    lines = text.splitlines(keepends=True)
+    keep, dropped, inside = [], [], False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            now_inside = stripped.startswith("[profiles.marvin]")
+            if now_inside and not inside:
+                # the "# Profile for switching to Marvin ..." comment above it goes too
+                while keep and keep[-1].lstrip().startswith("#"):
+                    dropped.append(keep.pop().rstrip("\n"))
+            inside = now_inside
+        if inside or re.match(r'^profile\s*=\s*"marvin"', stripped):
+            dropped.append(line.rstrip("\n"))
+            continue
+        keep.append(line)
+    if not dropped:
+        return
+    try:
+        backup = CODEX_CONFIG.with_name(f"config.toml.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+        CODEX_CONFIG.write_text("".join(keep))
+    except OSError as e:
+        print(f"WARNING: could not remove the legacy marvin profile from {CODEX_CONFIG}: {e}")
+        return
+    print(f"moved the legacy marvin profile out of {CODEX_CONFIG} into {CODEX_PROFILE}")
+    print(f"  removed {len(dropped)} line(s) ({dropped[0]!r} ...); previous file kept as {backup.name}")
+    print("  codex -p marvin fails outright while [profiles.marvin] or profile = \"marvin\" is left in config.toml")
+
+
+def codex_configured() -> bool:
+    """True when a local Codex config actually points at the generated catalog."""
+    for path in (CODEX_CONFIG, CODEX_PROFILE):
+        try:
+            if "model_catalog_json" in path.read_text():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def match_spec(model_id: str, key: str, cmd: str) -> dict | None:
+    """The THINKING_WIRING spec for a model: first match on an id/config-key marker
+    or on the chat template named in the cmd wins (so order matters). Shared by the pi
+    wiring pass and the Codex catalog so the two agents can never disagree about what a
+    model accepts."""
+    key = key.lower()
+    for spec in THINKING_WIRING:
+        markers = spec["marker"]
+        if isinstance(markers, str):
+            markers = [markers]
+        templates = spec.get("template") or []
+        if isinstance(templates, str):
+            templates = [templates]
+        if any(mk in model_id.lower() or mk in key for mk in markers) \
+                or any(t in cmd for t in templates):
+            return spec
+    return None
+
+
+def codex_reasoning(spec: dict | None) -> dict:
+    """default_reasoning_level / supported_reasoning_levels for one Codex model entry.
+
+    Both keys are REQUIRED together (a catalog without them fails to load: "missing field
+    supported_reasoning_levels"), and default_reasoning_level may not be "". Codex sends the
+    effort verbatim as `reasoning.effort`, so the accepted set is the spec's non-null
+    thinkingLevelMap values -- what the template/engine takes -- intersected with the effort
+    names Codex knows.
+
+    A model with no spec, or an on/off-only family (Qwen3.5/3.6, Laguna: empty map), gets an
+    empty list and the default "none": nothing to dial, so ask for no thinking. Templates that
+    RAISE on an unknown effort (Qwen3.8) always come with a spec and a list, so they never see
+    it. Note pi is not limited this way -- it drives enable_thinking plus chat_template_kwargs
+    per level, which Codex's catalog cannot express.
+    """
+    level_map: dict = dict(((spec or {}).get("fields") or {}).get("thinkingLevelMap") or {})
+    accepted = [e for e in CODEX_EFFORTS if e in set(level_map.values())]
+    if not accepted:
+        return {"default_reasoning_level": "none", "supported_reasoning_levels": []}
+    default = (spec or {}).get("defaultLevel")
+    if default not in accepted:
+        default = accepted[0]
+    return {
+        "default_reasoning_level": default,
+        "supported_reasoning_levels": [
+            {"effort": e, "description": f"{e} reasoning effort"} for e in accepted
+        ],
+    }
+
+
+def codex_catalog(models: list[dict], cmds: dict[str, str], keys: dict[str, str],
+                  instructions: str) -> dict:
+    """The same model list as pi's, in Codex's model_catalog_json shape.
+
+    Field notes for anyone editing this:
+    - context_window comes straight from the pi entry, i.e. out of the model's own -c /
+      --max-context flag, so Codex's auto-compact threshold matches the real window instead of
+      guessing (the reason this file exists).
+    - include_apps_usage_instructions false: Apps/Connectors are ChatGPT cloud services, they
+      are irrelevant here and cost thousands of tokens of prompt on every request. Skills stay
+      on so ~/.codex/skills still work.
+    - apply_patch_tool_type is deliberately unset: with it unset Codex makes edits through the
+      shell, which every model here manages. Set it to "freeform" only if you want to test the
+      patch tool on a model that handles it.
+    """
+    entries = []
+    for priority, m in enumerate(models, start=1):
+        spec = match_spec(m["id"], keys.get(m["id"], ""), cmds.get(m["id"], ""))
+        ctx = int(m["contextWindow"])
+        family = (spec or {}).get("label")
+        entry = {
+            "slug": m["id"],
+            "display_name": m["id"],
+            "description": f"{ctx // 1024}K context" + (f" \u00b7 {family}" if family else ""),
+            "shell_type": "unified_exec",
+            "visibility": "list",
+            "supported_in_api": True,
+            "priority": priority,
+            "context_window": ctx,
+            "support_verbosity": False,
+            # reasoning.summary stays "auto" in the request whatever this says: it comes from
+            # model_reasoning_summary in config.toml, not from the catalog (checked 2026-11-11).
+            "truncation_policy": {"mode": "tokens", "limit": 10000},
+            "experimental_supported_tools": [],
+            "include_skills_usage_instructions": True,
+            "include_plugin_usage_instructions": False,
+            "include_apps_usage_instructions": False,
+            "input_modalities": (["text", "image"]
+                                 if any(k in m["id"].lower() for k in CODEX_IMAGE_INPUT_MARKERS)
+                                 else ["text"]),
+            **codex_reasoning(spec),
+            "base_instructions": instructions,
+        }
+        entries.append(entry)
+    return {"models": entries}
+
+
 def main() -> None:
     dry_run = "--dry-run" in sys.argv
     try:
@@ -398,30 +658,18 @@ def main() -> None:
             cmds[name] = cmds[model_id]
             keys[name] = name
 
-    # Apply per-family thinking/effort wiring to the base entries. A spec matches
-    # on a substring of the lowercased model id OR config key, or on the chat
-    # template named in the cmd -- `marker` and `template` may each be a string or
-    # a list, and the first matching spec wins (so order matters). The config key
-    # counts because an alias id says nothing about the family: `subagent` moved
-    # from a Qwen3.8 27B to Strata and kept the 27B's chat-template wiring.
+    # Apply per-family thinking/effort wiring to the base entries (match_spec: marker
+    # substring of the id OR config key, or the chat template named in the cmd; first
+    # matching spec wins, so order matters). The config key counts because an alias id
+    # says nothing about the family: `subagent` moved from a Qwen3.8 27B to Strata and
+    # kept the 27B's chat-template wiring.
     levels: dict[str, str] = {}   # "marvin/<id>" -> pi startup thinking level
     for m in new_models:
-        cmd = cmds.get(m["id"], "")
-        key = keys.get(m["id"], "").lower()
-        for spec in THINKING_WIRING:
-            markers = spec["marker"]
-            if isinstance(markers, str):
-                markers = [markers]
-            templates = spec.get("template") or []
-            if isinstance(templates, str):
-                templates = [templates]
-            id_hit = any(mk in m["id"].lower() or mk in key for mk in markers)
-            tpl_hit = any(t in cmd for t in templates)
-            if id_hit or tpl_hit:
-                m.update(spec["fields"])
-                if spec.get("defaultLevel"):
-                    levels[f"{PROVIDER_NAME}/{m['id']}"] = spec["defaultLevel"]
-                break
+        spec = match_spec(m["id"], keys.get(m["id"], ""), cmds.get(m["id"], ""))
+        if spec:
+            m.update(spec["fields"])
+            if spec.get("defaultLevel"):
+                levels[f"{PROVIDER_NAME}/{m['id']}"] = spec["defaultLevel"]
 
     out = {
         "providers": {
@@ -429,7 +677,10 @@ def main() -> None:
         }
     }
 
-    settings = json.loads(PI_SETTINGS.read_text()) if PI_SETTINGS.exists() else {}
+    try:
+        settings = json.loads(PI_SETTINGS.read_text()) if PI_SETTINGS.exists() else {}
+    except (OSError, json.JSONDecodeError) as e:
+        sys.exit(f"error reading {PI_SETTINGS}: {e}")
     old_levels = dict(settings.get("modelThinkingLevels") or {})
     new_levels = {k: v for k, v in old_levels.items()
                   if not k.startswith(f"{PROVIDER_NAME}/")}
@@ -458,6 +709,23 @@ def main() -> None:
     print("pi thinking-level changes:",
           [f"{k}: {old_levels.get(k)} -> {new_levels.get(k)}" for k in level_changes] or "none")
 
+    # --- Codex catalog ---------------------------------------------------------
+    try:
+        instructions = CODEX_INSTRUCTIONS.read_text()
+    except OSError as e:
+        sys.exit(f"error reading {CODEX_INSTRUCTIONS} (Codex needs base_instructions): {e}")
+    catalog = codex_catalog(new_models, cmds, keys, instructions)
+    codex_ids = {e["slug"] for e in catalog["models"]}
+    cur_codex_ids: set[str] = set()
+    if CODEX_CATALOG.exists():
+        try:
+            cur_codex_ids = {e["slug"] for e in json.loads(CODEX_CATALOG.read_text())["models"]}
+        except (OSError, KeyError, TypeError, json.JSONDecodeError) as e:
+            print(f"note: could not read the old {CODEX_CATALOG} ({e}); no Codex diff this run")
+
+    print("codex removing:", sorted(cur_codex_ids - codex_ids) or "nothing")
+    print("codex adding:  ", sorted(codex_ids - cur_codex_ids) or "nothing")
+
     if dry_run:
         print("(dry run — nothing written)")
         return
@@ -471,19 +739,20 @@ def main() -> None:
         settings["modelThinkingLevels"] = new_levels
         PI_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
         print(f"updated modelThinkingLevels in {PI_SETTINGS}")
-    print("sending to guybrush, colin & ssdnodes")
-    src = str(Path.home() / "llama-swap/models.json")
-    targets = [
-        ("-P42", "ssd-nodes.akita-betelgeuse.ts.net:~/.pi/agent/models.json"),
-        (None, "guybrush.akita-betelgeuse.ts.net:~/.pi/agent/models.json"),
-        (None, "colin.akita-betelgeuse.ts.net:~/.pi/agent/models.json"),
-    ]
-    for opt, dest in targets:
-        args = ["scp", src, dest] if opt is None else ["scp", opt, src, dest]
-        try:
-            subprocess.run(args, check=True)
-        except subprocess.CalledProcessError:
-            print(f"  WARNING: scp to {dest} failed; local files are written, copy manually")
+
+    try:
+        CODEX_CATALOG.parent.mkdir(parents=True, exist_ok=True)
+        CODEX_CATALOG.write_text(json.dumps(catalog, indent=2) + "\n")
+    except OSError as e:
+        sys.exit(f"error writing {CODEX_CATALOG}: {e}")
+    print(f"wrote {CODEX_CATALOG} ({len(catalog['models'])} models)")
+    ensure_codex_profile()
+    if not codex_configured():
+        print(f"note: no ~/.codex config sets model_catalog_json, so Codex is not reading "
+              f"{CODEX_CATALOG} yet. Put it in the marvin PROFILE (~/.codex/marvin.config.toml) "
+              f"-- in config.toml it would replace the whole catalog and hide the OpenAI models.")
+
+    push()
     print("done")
 
 
