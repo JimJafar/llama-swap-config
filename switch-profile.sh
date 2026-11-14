@@ -7,15 +7,8 @@ case "$PROFILE" in
 27b) WORKLOAD=Q3.8-27B-IQ4XS ;;
 dflash2) WORKLOAD=Q3.8-27B-IQ4XS-DF2 ;;
 q6) WORKLOAD=Q3.8-27B-Q6KM ;;
-flash)
-	# GSQ-RCO Q2_0 (ISTA) rather than the AtomicChat IQ4_XS build: switched 2026-09-17.
-	# Same three-card set as the AtomicChat entry (5070 Ti + 5060 Ti + 3090) and the same
-	# swap group, so the group logic below is unchanged. Bonus: -c 262144 vs 196608.
-	WORKLOAD=Q3.8-FN-GSQ-RCO-Q2_0
-	NEED_GEMMA=1
-	;;
 *)
-	echo "Usage: $0 {27b|dflash2|q6|flash}" >&2
+	echo "Usage: $0 {27b|dflash2|q6}" >&2
 	exit 64
 	;;
 esac
