@@ -1,5 +1,5 @@
 Responses usage.input_tokens: report the engine-counted prompt, not len(text)//4.
-Base: 84710728 (github.com/jesdga95/basalt). Apply in ~/lab/basalt: git apply ~/llama-swap/basalt/patches/responses-input-tokens.patch
+Base: 6809edfa (github.com/jesdga95/basalt, 0.4.0+). Committed locally in ~/lab/basalt as branch marvin-local (838bae2f, never pushed); after a pull, rebase marvin-local or git apply this file.
 Upstream PR: https://github.com/jesdga95/basalt/pull/381 (opened 2026-11-15); drop this patch once it is merged and pulled.
 
 diff --git a/serve/service.py b/serve/service.py
