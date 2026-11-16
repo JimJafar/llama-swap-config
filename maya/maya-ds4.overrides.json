@@ -1,0 +1,18 @@
+{
+  "_what": "Merged into ~/lab/project-maya/maya-ds4.json by run-maya.sh at every start (Maya's setup rewrites that file on an update). DeepSeek on the 3090 + ZOTAC beside Basalt; measured 2026-11-16 in bench/results/llm-ds4-pair-2026-11-16.jsonl (Maya 1.1.65): 26.4 -> 29.2 tok/s decode, 428 -> 1,048 tok/s reading 29K, load ~1 -> ~5 min.",
+  "env": {
+    "MAYA_DS4_TP_GGUF_UNEVEN": "1",
+    "MAYA_DS4_TP_CHECK": "1",
+    "DS4_RING_MB": "auto",
+    "DS4_COPY_GB": "130",
+    "DS4_RAM_MARGIN_GB": "12",
+    "MAYA_DS4_COPY_SWAP": "1",
+    "MAYA_DS4_HOST_FREE_TP": "1",
+    "MAYA_DS4_HC_FUSE": "2",
+    "MAYA_DS4_ROUTE_FUSE": "2"
+  },
+  "args": {
+    "--tp": "2",
+    "--mmap-experts": "off"
+  }
+}

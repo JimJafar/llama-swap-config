@@ -9,7 +9,9 @@
 # 1. Rewrites the config's "gpu" (nvidia-smi numbers, which Maya wants) from the UUIDs:
 #    the numbering changes whenever a card is added, removed or moved. With
 #    --max-context N, also sets the engine's context there (so llama-swap's config.yaml is
-#    where it's chosen, and sync-models.py reads it for pi's models.json).
+#    where it's chosen, and sync-models.py reads it for pi's models.json). Then merges in
+#    maya/<CONFIG name>.overrides.json when there is one ("env" keys, "args" flag values):
+#    tuned settings kept here, since Maya's setup rewrites its config on an update.
 # 2. Unloads Strata: Maya needs every card, and Strata's group is persistent, so
 #    llama-swap won't evict it. Going back is automatic: a Strata request evicts Maya
 #    (Strata's group is exclusive, the "maya" group isn't persistent).
@@ -25,7 +27,7 @@ CTX=""
 if [ "${1:-}" = "--max-context" ]; then CTX="$2"; shift 2; fi
 MAYA=/home/jim/lab/project-maya
 
-python3 - "$CONFIG" "$CTX" "$@" <<'PY'
+MAYA_OVERRIDES_DIR="$(cd "$(dirname "$0")" && pwd)" python3 - "$CONFIG" "$CTX" "$@" <<'PY'
 import json, os, subprocess, sys
 path, ctx, uuids = sys.argv[1], sys.argv[2], sys.argv[3:]
 out = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
@@ -51,6 +53,30 @@ if ctx:
     else:
         args += ["--max-context", ctx]
         changed = True
+# Tuned settings kept in this repo (maya/<config name>.overrides.json): Maya's setup
+# rewrites its config on an update, so they are merged in again at every start.
+over_path = os.path.join(os.environ["MAYA_OVERRIDES_DIR"],
+                         os.path.basename(path).replace(".json", ".overrides.json"))
+if os.path.exists(over_path):
+    over = json.load(open(over_path))
+    env = cfg.setdefault("env", {})
+    for k, v in over.get("env", {}).items():
+        if env.get(k) != v:
+            print(f"run-maya.sh: env {k} {env.get(k)} -> {v}", file=sys.stderr)
+            env[k] = v
+            changed = True
+    args = cfg.setdefault("args", [])
+    for flag, v in over.get("args", {}).items():
+        if flag in args:
+            i = args.index(flag)
+            if args[i + 1] != v:
+                print(f"run-maya.sh: {flag} {args[i + 1]} -> {v}", file=sys.stderr)
+                args[i + 1] = v
+                changed = True
+        else:
+            print(f"run-maya.sh: {flag} {v} (added)", file=sys.stderr)
+            args += [flag, v]
+            changed = True
 if changed:
     json.dump(cfg, open(path + ".tmp", "w"), indent=1)
     os.replace(path + ".tmp", path)
