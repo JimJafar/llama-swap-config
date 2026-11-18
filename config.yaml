@@ -1337,6 +1337,28 @@ models:
     cmd: /home/jim/llama-swap/tts/run-bluetts.sh ${PORT}
     proxy: http://127.0.0.1:${PORT}
 
+    # --- TTS: ZONOS3-Mini (Zyphra/ZONOS3-Mini), CPU only (added 2026-11-18) ---
+    # 800M-parameter MoE (~100M active) autoregressive codec LM, 44.1 kHz, 43 languages, served
+    # by Zyphra's C++/ggml zonos3-server on the CPU (setup in tts/run-zonos3.sh). Group "cpu-tts"
+    # with bluetts: both can be loaded at once and neither evicts anything.
+    # POST /v1/audio/speech {"model":"zonos3","input":"...","voice":"<id>","response_format":"wav"}
+    # response_format is wav or pcm only (no mp3). `voice` must be a speaker id of
+    # GET /v2/speakers (names are refused; without a voice the speaker is random). The ids are
+    # sha1s of the voice file's path, so they are stable. English presets:
+    #   default_3765f0d1140c05c0 Rupert (British M)   default_b78b28baf5c31a1d Imogen (British F)
+    #   default_2c5123a959875341 Cillian (Irish M)    default_34370fd91e3484ef Wyatt (American M)
+    #   default_de4d191ca7574982 Savannah (American F) default_3c00e421e684f949 Thaddeus (announcer M)
+    #   default_c95cf57259ed7313 Jett, default_40a3ba1017bfb68a Morgana, default_c5e098c322aae901 Sakura,
+    #   default_940eaff39a929da0 Willow.
+    # The native POST /v2/generate adds emotion/style steering (`controls`), speaking rate, voice
+    # cloning from a clip (speaker_audio_base64) and streaming; the studio UI is at / of the port.
+    # MEASURED 2026-11-18 (EPYC 7443): ready ~2 s after start, ~1.9 GiB RSS; CLI 15.2 s of audio
+    # = 1.07 s generation (220 frames/s) + 3.24 s decode; a short line ~1.1 s over HTTP.
+  zonos3:
+    checkEndpoint: /v2/health
+    cmd: /home/jim/llama-swap/tts/run-zonos3.sh ${PORT}
+    proxy: http://127.0.0.1:${PORT}
+
     # ############################################################################## #
     # GROUPS                                                                          #
     #   `dictation`: keep ASR (NPU) + cleanup LLM (ZOTAC) resident together.         #
@@ -1492,13 +1514,15 @@ groups:
       # brain, ZOTAC, ~4.2 GiB with MTP. Preloaded, so the first wake word answers at once.
       - Qwen3.5-4B
   "cpu-tts":
-    # BlueTTS on the CPU (2026-11-18). Shares no hardware with anything, so it swaps out
-    # nothing (swap:false, exclusive:false) and isn't held resident (persistent:false).
+    # The CPU TTS models (2026-11-18): BlueTTS and ZONOS3-Mini. They use no GPU, so they
+    # coexist with each other and swap out nothing (swap:false, exclusive:false), and aren't
+    # held resident (persistent:false).
     swap: false
     exclusive: false
     persistent: false
     members:
       - bluetts
+      - zonos3
   "beside-basalt":
     # Models on the 3090 + ZOTAC (2026-11-06), the cards Basalt-Q4KXL leaves free: loading one
     # swaps out the others and leaves Basalt loaded. maya-glm is preloaded but NOT persistent:

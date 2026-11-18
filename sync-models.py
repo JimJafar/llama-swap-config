@@ -101,6 +101,7 @@ EXCLUDES = {
     "whisper-npu-asr",      # dictation (NPU ASR)
     "qwen-clean-2b",        # dictation (prompt cleaner)
     "bluetts",              # TTS (CPU), not a chat model
+    "zonos3",               # TTS (CPU), not a chat model
     "qwen38-27b-nvfp4",     # vLLM 27B — not exposed to pi (remove to include)
 }
 
