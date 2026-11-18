@@ -1322,6 +1322,21 @@ models:
     proxy: http://127.0.0.1:5811
     # No cmdStop: llama-swap SIGTERMs the process directly.
 
+    # --- TTS: BlueTTS (BlueV3 v3.0.1, notmax123/BlueV3-onnx), CPU only (added 2026-11-18) ---
+    # Flow-matching TTS, 44.1 kHz, ONNX Runtime on the CPU: uses no GPU, so it sits in its
+    # own non-exclusive group ("cpu-tts") and evicts nothing. tts/run-bluetts.sh has the setup.
+    # POST /v1/audio/speech {"model":"bluetts","input":"...","voice":"daniel"}; optional
+    # "language" (en/de/es/it/ru; he/yi need bundle files not downloaded), "speed",
+    # response_format mp3/opus/aac/flac/wav/pcm. Voices: maya noa lily tamar shira yael emma
+    # sara (female), adam daniel david jonathan ethan michael ariel (male), LibriTTS-R
+    # (LibriVox) speakers; default daniel. OpenAI names alloy/echo/fable/onyx/nova/shimmer
+    # map onto them. Cloning from a ~10 s WAV is supported by the code but not set up here.
+    # MEASURED 2026-11-18 (8 ORT threads): ~0.8 s load, 0.6 s for 7.2 s of audio (RTF 0.085).
+  bluetts:
+    checkEndpoint: /health
+    cmd: /home/jim/llama-swap/tts/run-bluetts.sh ${PORT}
+    proxy: http://127.0.0.1:${PORT}
+
     # ############################################################################## #
     # GROUPS                                                                          #
     #   `dictation`: keep ASR (NPU) + cleanup LLM (ZOTAC) resident together.         #
@@ -1476,6 +1491,14 @@ groups:
       # Qwen3.5-4B (2026-10-13, replaced LFM2.5-2.6B): `voice-agent`, alexa-marvin's
       # brain, ZOTAC, ~4.2 GiB with MTP. Preloaded, so the first wake word answers at once.
       - Qwen3.5-4B
+  "cpu-tts":
+    # BlueTTS on the CPU (2026-11-18). Shares no hardware with anything, so it swaps out
+    # nothing (swap:false, exclusive:false) and isn't held resident (persistent:false).
+    swap: false
+    exclusive: false
+    persistent: false
+    members:
+      - bluetts
   "beside-basalt":
     # Models on the 3090 + ZOTAC (2026-11-06), the cards Basalt-Q4KXL leaves free: loading one
     # swaps out the others and leaves Basalt loaded. maya-glm is preloaded but NOT persistent:
