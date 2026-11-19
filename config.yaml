@@ -1359,6 +1359,29 @@ models:
     cmd: /home/jim/llama-swap/tts/run-zonos3.sh ${PORT}
     proxy: http://127.0.0.1:${PORT}
 
+    # --- STT: Parakeet TDT 0.6B v2 on the CPU (added 2026-11-19), on demand ---
+    # Marvin's speech-to-text since the NPU went (whisper-npu-asr) and Diction was retired.
+    # English only, punctuation and capitals. stt/asr_server.py (OpenAI-compatible) over
+    # transcribe.cpp's CPU-only shared build in ~/lab/transcribe.cpp/build-cpu-shared, venv
+    # ~/lab/stt-env. Model: handy-computer/parakeet-tdt-0.6b-v2-gguf Q8_0 (730 MB, SHA-256
+    # f0d0e99c...). Chosen by bench/asr (CPU, LibriSpeech test-other sample): 3.49% WER,
+    # ~40x real time on 16 threads; Granite 5.0 TurboCTC was 2.55% but has no punctuation.
+    # POST /v1/audio/transcriptions (multipart `file`, any format ffmpeg reads; model=parakeet-cpu
+    # or stt); response_format json, text or verbose_json (segments). Group "cpu-tts".
+    # MEASURED 2026-11-19: 29.5 s clip in 0.69 s warm (16 threads).
+  parakeet-cpu:
+    aliases:
+      - stt
+    checkEndpoint: /health
+    env:
+      - TRANSCRIBE_LIBRARY=/home/jim/lab/transcribe.cpp/build-cpu-shared/src/libtranscribe.so
+      - CUDA_VISIBLE_DEVICES=
+    cmd: >-
+      /home/jim/lab/stt-env/bin/python /home/jim/llama-swap/stt/asr_server.py --port ${PORT}
+      --model /mnt/data/models/parakeet-tdt-0.6b-v2/parakeet-tdt-0.6b-v2-Q8_0.gguf
+      --name parakeet-cpu --threads 16
+    proxy: http://127.0.0.1:${PORT}
+
     # ############################################################################## #
     # GROUPS                                                                          #
     #   `dictation`: keep ASR (NPU) + cleanup LLM (ZOTAC) resident together.         #
@@ -1514,15 +1537,16 @@ groups:
       # brain, ZOTAC, ~4.2 GiB with MTP. Preloaded, so the first wake word answers at once.
       - Qwen3.5-4B
   "cpu-tts":
-    # The CPU TTS models (2026-11-18): BlueTTS and ZONOS3-Mini. They use no GPU, so they
-    # coexist with each other and swap out nothing (swap:false, exclusive:false), and aren't
-    # held resident (persistent:false).
+    # The CPU voice models (2026-11-18): BlueTTS, ZONOS3-Mini and (2026-11-19) the Parakeet STT.
+    # They use no GPU, so they coexist with each other and swap out nothing (swap:false,
+    # exclusive:false), and aren't held resident (persistent:false).
     swap: false
     exclusive: false
     persistent: false
     members:
       - bluetts
       - zonos3
+      - parakeet-cpu
   "beside-basalt":
     # Models on the 3090 + ZOTAC (2026-11-06), the cards Basalt-Q4KXL leaves free: loading one
     # swaps out the others and leaves Basalt loaded. maya-glm is preloaded but NOT persistent:
