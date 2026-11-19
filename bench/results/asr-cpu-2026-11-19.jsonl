@@ -1,0 +1,11 @@
+{"date": "2026-11-19", "engine": "transcribe.cpp adfc5021 CPU build (GGML_NATIVE), Q8_0, -l en", "set": "LibriSpeech test-other, 80 utts / 10 speakers / 489.2 s / 1367 words", "machine": "EPYC 7443, load avg ~4, Basalt + maya-glm loaded on GPUs"}
+{"model": "granite-speech-5.0-470m-turboctc", "threads": 8, "wer_pct": 2.55, "rtfx": 29.6, "median_ms": 180, "p90_ms": 382, "clip_29.5s_ms": 907, "punctuation": false}
+{"model": "granite-speech-5.0-470m-turboctc", "threads": 16, "rtfx": 46.8, "median_ms": 112, "clip_29.5s_ms": 536}
+{"model": "parakeet-tdt-0.6b-v2", "threads": 8, "wer_pct": 3.49, "rtfx": 26.5, "median_ms": 194, "p90_ms": 433, "clip_29.5s_ms": 1136, "punctuation": true}
+{"model": "parakeet-tdt-0.6b-v2", "threads": 16, "rtfx": 39.9, "median_ms": 129, "clip_29.5s_ms": 694}
+{"model": "parakeet-tdt-0.6b-v3", "threads": 8, "wer_pct": 3.49, "rtfx": 26.0, "median_ms": 195, "p90_ms": 443, "punctuation": true}
+{"model": "Qwen3-ASR-0.6B", "threads": 8, "wer_pct": 3.49, "rtfx": 11.2, "median_ms": 446, "p90_ms": 1013, "punctuation": true}
+{"model": "moonshine-streaming-medium", "threads": 8, "wer_pct": 3.78, "rtfx": 21.7, "median_ms": 225, "p90_ms": 488, "clip_29.5s_ms": 1702, "punctuation": true}
+{"model": "moonshine-streaming-medium", "threads": 16, "rtfx": 28.7, "median_ms": 179, "clip_29.5s_ms": 1322}
+{"model": "parakeet-tdt_ctc-110m", "threads": 8, "wer_pct": 4.73, "rtfx": 83.0, "median_ms": 62, "p90_ms": 136, "punctuation": true}
+{"model": "moonshine-streaming-small", "threads": 8, "wer_pct": 5.6, "rtfx": 41.1, "median_ms": 122, "p90_ms": 259, "punctuation": false}
