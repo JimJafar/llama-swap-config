@@ -465,62 +465,6 @@ models:
       --port 8080
     cmdStop: docker stop q38-27b
 
-  # --- Clairic (2026-11-20): Cloudflare's structured-extraction fine-tunes, Xylolabs GGUFs ---
-  # Apache-2.0. Each takes a state (text, JSON, images) plus typed fields and returns JSON.
-  # Flags follow the GGUF cards (Xylolabs/clairic-flash-GGUF, Xylolabs/clairic-GGUF):
-  # --jinja, -ngl 99, -c 32768, thinking off via enable_thinking:false (as Cloudflare's own
-  # runtime runs them), the BF16 mmproj for image input. The cards give no sampling settings.
-  # For schema-shaped JSON, send response_format json_schema; llama.cpp makes it a grammar.
-  # Cloudflare's typed extraction head (confidence, p_null, quantiles) is not in the GGUFs.
-  # Files in /mnt/data/models/clairic, SHA-256-checked against the repos (SHA256SUMS there).
-  # Both are in "beside-basalt": loading one swaps out maya-glm, maya-deepseek, Q3.8-27B-Q6KM
-  # and the other Clairic (they share the 3090 / ZOTAC) and leaves Basalt loaded.
-  clairic-flash:
-    # 9B (Qwen3.5-9B base), Q6_K (7.37 GB, KL 0.013 vs f32), on the ZOTAC 5060 Ti only.
-    # Measured 2026-11-20: 9.2 GiB loaded; ~290 tok/s prefill, 53 tok/s decode (short prompt).
-    cmd: |
-      /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name clairic-flash --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/data/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/clairic/clairic-flash-Q6_K.gguf
-      --mmproj /models/clairic/mmproj-clairic-flash-BF16.gguf
-      --jinja
-      --chat-template-kwargs "{\"enable_thinking\":false}"
-      -ngl 99
-      -fa on
-      -c 32768
-      -np 1
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop clairic-flash
-
-  clairic:
-    # 27B (Qwen3.8-27B base), Q5_K_M (19.36 GB, KL 0.024 vs f32), on the 3090 only.
-    # q8_0 KV cache to leave headroom on the 24 GB card beside the 0.9 GB mmproj.
-    # Measured 2026-11-20: 21.1 GiB of 24 loaded (image input works); ~276 tok/s prefill,
-    # 36 tok/s decode (short prompt).
-    cmd: |
-      /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name clairic --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
-      -p ${PORT}:8080 -v /mnt/data/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/clairic/clairic-Q5_K_M.gguf
-      --mmproj /models/clairic/mmproj-clairic-BF16.gguf
-      --jinja
-      --chat-template-kwargs "{\"enable_thinking\":false}"
-      -ngl 99
-      -fa on
-      -c 32768
-      -ctk q8_0
-      -ctv q8_0
-      -np 1
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop clairic
-
   # --- Altworld/Hemmingway-1 (added 2026-09-21) ---
   # A prose-writing fine-tune of Qwen3.8-27B, Apache-2.0. bartowski imatrix Q4_K_M
   # (17.44 GB / 16.24 GiB), quantized with llama.cpp b10964. Built on the same base as
@@ -567,7 +511,7 @@ models:
   # MUST stay in the `qwen38-workload` group or it will not swap.
   Hemmingway:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,clairic /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -666,7 +610,7 @@ models:
   # first (switch-profile.sh) -- this entry cannot evict a persistent group.
   Swift-1.5-27B-Q6KS:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,clairic /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
       # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
@@ -1616,6 +1560,3 @@ groups:
       - maya-glm
       - Q3.8-27B-Q6KM
       - maya-deepseek
-      # 2026-11-20: Clairic Flash on the ZOTAC, Clairic on the 3090.
-      - clairic-flash
-      - clairic
