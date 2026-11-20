@@ -80,6 +80,26 @@
           }
         },
         {
+          "input": [
+            "text",
+            "image"
+          ],
+          "id": "clairic-flash",
+          "contextWindow": 32768,
+          "maxTokens": 31129,
+          "reasoning": false
+        },
+        {
+          "input": [
+            "text",
+            "image"
+          ],
+          "id": "clairic",
+          "contextWindow": 32768,
+          "maxTokens": 31129,
+          "reasoning": false
+        },
+        {
           "id": "Hemmingway",
           "input": [
             "text"
