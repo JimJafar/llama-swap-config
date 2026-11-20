@@ -477,6 +477,7 @@ models:
   # and the other Clairic (they share the 3090 / ZOTAC) and leaves Basalt loaded.
   clairic-flash:
     # 9B (Qwen3.5-9B base), Q6_K (7.37 GB, KL 0.013 vs f32), on the ZOTAC 5060 Ti only.
+    # Measured 2026-11-20: 9.2 GiB loaded; ~290 tok/s prefill, 53 tok/s decode (short prompt).
     cmd: |
       /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name clairic-flash --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
@@ -498,6 +499,8 @@ models:
   clairic:
     # 27B (Qwen3.8-27B base), Q5_K_M (19.36 GB, KL 0.024 vs f32), on the 3090 only.
     # q8_0 KV cache to leave headroom on the 24 GB card beside the 0.9 GB mmproj.
+    # Measured 2026-11-20: 21.1 GiB of 24 loaded (image input works); ~276 tok/s prefill,
+    # 36 tok/s decode (short prompt).
     cmd: |
       /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name clairic --runtime nvidia --cap-add SYS_ADMIN
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
