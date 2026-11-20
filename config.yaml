@@ -465,6 +465,39 @@ models:
       --port 8080
     cmdStop: docker stop q38-27b
 
+  # --- Inkling 2 Mini (2026-11-20): Thinking Machines Lab, Apache-2.0, Unsloth GGUF ---
+  # 26.2B MoE (3.4B active, 5.4B effective: layers 6-17 run three times per token, a "looped"
+  # transformer), text + image in, 1M native context. UD-Q4_K_XL (17.63 GB, KLD 0.0107,
+  # 98.0% top-token match vs UD-Q8_K_XL) + mmproj-F16 (0.64 GB), in /mnt/data/models/inkling,
+  # SHA-256-checked against the repo (SHA256SUMS there).
+  # ENGINE: upstream llama.cpp cannot run looped layers yet, so this uses Unsloth's prebuilt
+  # b12588-mix-c0c3de8 (source 8832860), CUDA 13 portable, unpacked in
+  # ~/lab/llama-unsloth-b12588 (release tarball SHA-256 checked). Swap to the Docker image
+  # once upstream lands Inkling support (ggml-org/llama.cpp#32694).
+  # Flags are the Unsloth guide's: --jinja (embedded template), 32K, -np 1, temp 1.0,
+  # top-p 1.0, top-k 0, min-p 0. The card warns of long reasoning loops: cap output tokens.
+  # Optional DSpark drafter (dspark-Inkling-2-Mini-Q8_0.gguf, --spec-type draft-dspark) not
+  # used yet. On the 3090 alone, group "beside-basalt": loading it swaps out maya-glm,
+  # maya-deepseek and Q3.8-27B-Q6KM and leaves Basalt loaded.
+  inkling-2-mini:
+    env:
+      - CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+    cmd: |
+      /home/jim/llama-swap/maya/free-comfyui.sh /home/jim/lab/llama-unsloth-b12588/llama-server
+      -m /mnt/data/models/inkling/Inkling-2-Mini-UD-Q4_K_XL.gguf
+      --mmproj /mnt/data/models/inkling/mmproj-F16.gguf
+      --jinja
+      -ngl 99
+      -c 32768
+      -np 1
+      --temp 1.0
+      --top-p 1.0
+      --top-k 0
+      --min-p 0.0
+      --timeout 900
+      --host 127.0.0.1
+      --port ${PORT}
+
   # --- Altworld/Hemmingway-1 (added 2026-09-21) ---
   # A prose-writing fine-tune of Qwen3.8-27B, Apache-2.0. bartowski imatrix Q4_K_M
   # (17.44 GB / 16.24 GiB), quantized with llama.cpp b10964. Built on the same base as
@@ -511,7 +544,7 @@ models:
   # MUST stay in the `qwen38-workload` group or it will not swap.
   Hemmingway:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -610,7 +643,7 @@ models:
   # first (switch-profile.sh) -- this entry cannot evict a persistent group.
   Swift-1.5-27B-Q6KS:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
       # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
@@ -1560,3 +1593,5 @@ groups:
       - maya-glm
       - Q3.8-27B-Q6KM
       - maya-deepseek
+      # 2026-11-20: Inkling 2 Mini on the 3090.
+      - inkling-2-mini

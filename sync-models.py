@@ -93,7 +93,7 @@ CODEX_INSTRUCTIONS = Path(__file__).resolve().parent / "codex/marvin-instruction
 # effort they do not know.
 CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 # Ids whose model takes images as well as text. Matched as a substring of the id.
-CODEX_IMAGE_INPUT_MARKERS = ("vision",)
+CODEX_IMAGE_INPUT_MARKERS = ("vision", "inkling")
 
 # Models in config.yaml that should NOT appear in models.json.
 # unlisted entries are skipped automatically; these are the rest.

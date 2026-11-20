@@ -80,6 +80,16 @@
           }
         },
         {
+          "input": [
+            "text",
+            "image"
+          ],
+          "id": "inkling-2-mini",
+          "contextWindow": 32768,
+          "reasoning": true,
+          "maxTokens": 31129
+        },
+        {
           "id": "Hemmingway",
           "input": [
             "text"
