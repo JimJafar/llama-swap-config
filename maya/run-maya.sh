@@ -18,14 +18,17 @@
 # 3. Runs Maya's dashboard + API on PORT. Maya stops its server and engine itself on the
 #    SIGTERM llama-swap sends.
 #
-# Maya pins most of the free RAM while it runs (all but ~6 GB).
+# Maya pins most of the free RAM while it runs (all but ~6 GB; not maya-ik2, which maps its file).
+#
+# MAYA_DIR (env) picks another Maya checkout: inkling-2-mini runs from a git worktree at
+# ~/lab/maya-ik2 (newer Maya, built by hand; see config.yaml).
 set -eu
 PORT="${1:?usage: run-maya.sh PORT CONFIG UUID...}"
 CONFIG="${2:?usage: run-maya.sh PORT CONFIG UUID...}"
 shift 2
 CTX=""
 if [ "${1:-}" = "--max-context" ]; then CTX="$2"; shift 2; fi
-MAYA=/home/jim/lab/project-maya
+MAYA="${MAYA_DIR:-/home/jim/lab/project-maya}"
 
 MAYA_OVERRIDES_DIR="$(cd "$(dirname "$0")" && pwd)" python3 - "$CONFIG" "$CTX" "$@" <<'PY'
 import json, os, subprocess, sys
@@ -91,7 +94,7 @@ while pgrep -f "Strata/engine/strata --serve" >/dev/null && [ $i -lt 60 ]; do sl
 # On a config reload llama-swap starts this before the previous Maya engine has exited and
 # freed its cards (2026-11-01: the reloaded pair failed to start); wait up to 60 s more.
 i=0
-while pgrep -f '[b]uild/maya --serve|[b]uild/maya-ds4 ' >/dev/null && [ $i -lt 120 ]; do sleep 1; i=$((i + 1)); done
+while pgrep -f '[b]uild/maya --serve|[b]uild/maya-ds4 |[b]uild/maya-ik2 ' >/dev/null && [ $i -lt 120 ]; do sleep 1; i=$((i + 1)); done
 # 2026-11-06: and for the old server to let go of the port. On a reload llama-swap reuses the
 # port, and Maya's server outlives its engine by a few seconds ("port 5915 is already in use").
 i=0

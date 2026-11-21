@@ -177,6 +177,28 @@ MAX_TOKENS_RATIO = 0.95
 # the level unsupported (hidden/clamped by pi). Values must match what each
 # template accepts - some templates throw on unknown effort values.
 THINKING_WIRING = [
+    # Inkling 2 Mini on Project Maya's maya-ik2 (2026-11-21). Maya's frontend passes the
+    # template's own effort names through (serve/frontend.py INKLING_EFFORT: none, minimal,
+    # low, medium, high, xhigh, max) and turns enable_thinking false into "none".
+    {
+        "marker": "inkling",
+        "label": "Inkling (Maya)",
+        "defaultLevel": "high",
+        "fields": {
+            "reasoning": True,
+            "thinkingLevelMap": {
+                "minimal": "minimal", "low": "low", "medium": "medium",
+                "high": "high", "xhigh": "xhigh", "max": "max",
+            },
+            "compat": {
+                "thinkingFormat": "chat-template",
+                "chatTemplateKwargs": {
+                    "enable_thinking": {"$var": "thinking.enabled"},
+                    "reasoning_effort": {"$var": "thinking.effort"},
+                },
+            },
+        },
+    },
     # Project Maya (maya-glm, maya-deepseek; maya/run-maya.sh). FIRST: maya-deepseek would
     # otherwise match the llama.cpp DeepSeek spec below, whose `thinking` kwarg Maya's
     # server ignores (thinking could not be turned off). Maya reads top-level or

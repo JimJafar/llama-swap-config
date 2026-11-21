@@ -9,3 +9,7 @@ memory-monitor.log
 images/
 
 llama.log
+
+# Maya runtime state, written beside the run configs in maya/ (token counts, vision memory probe)
+maya/token-savings.json
+maya/vision-memory.json

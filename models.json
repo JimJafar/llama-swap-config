@@ -85,9 +85,28 @@
             "image"
           ],
           "id": "inkling-2-mini",
-          "contextWindow": 98304,
+          "contextWindow": 196608,
           "reasoning": true,
-          "maxTokens": 93388
+          "maxTokens": 186777,
+          "thinkingLevelMap": {
+            "minimal": "minimal",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
         },
         {
           "input": [
@@ -97,7 +116,26 @@
           "id": "inkling-2-mini-256k",
           "contextWindow": 262144,
           "reasoning": true,
-          "maxTokens": 249036
+          "maxTokens": 249036,
+          "thinkingLevelMap": {
+            "minimal": "minimal",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
         },
         {
           "id": "Hemmingway",
