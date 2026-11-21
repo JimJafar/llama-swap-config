@@ -85,9 +85,9 @@
             "image"
           ],
           "id": "inkling-2-mini",
-          "contextWindow": 32768,
+          "contextWindow": 65536,
           "reasoning": true,
-          "maxTokens": 31129
+          "maxTokens": 62259
         },
         {
           "id": "Hemmingway",

@@ -474,14 +474,22 @@ models:
   # b12588-mix-c0c3de8 (source 8832860), CUDA 13 portable, unpacked in
   # ~/lab/llama-unsloth-b12588 (release tarball SHA-256 checked). Swap to the Docker image
   # once upstream lands Inkling support (ggml-org/llama.cpp#32694).
-  # Flags are the Unsloth guide's: --jinja (embedded template), 32K, -np 1, temp 1.0,
-  # top-p 1.0, top-k 0, min-p 0. The card warns of long reasoning loops: cap output tokens.
-  # Optional DSpark drafter (dspark-Inkling-2-Mini-Q8_0.gguf, --spec-type draft-dspark) not
-  # used yet. On the 3090 alone, group "beside-basalt": loading it swaps out maya-glm,
-  # maya-deepseek and Q3.8-27B-Q6KM and leaves Basalt loaded.
-  # Measured 2026-11-21: 19.3 GiB of 24 at 32K (f16 KV); text, code and image input work;
-  # ~1110 tok/s prefill on a 14.6K-token prompt, 51-54 tok/s decode. It thinks by default
-  # (reasoning_content), briefly on simple prompts.
+  # Sampling is the Unsloth guide's: --jinja (embedded template), -np 1, temp 1.0, top-p 1.0,
+  # top-k 0, min-p 0. The card warns of long reasoning loops: cap output tokens.
+  # On the 3090 alone, group "beside-basalt": loading it swaps out maya-glm, maya-deepseek and
+  # Q3.8-27B-Q6KM and leaves Basalt loaded.
+  # CONTEXT (2026-11-21, Jim: fill the 3090): 64K is the most that fits with the drafter. The
+  # card's 32K used 19.3 GiB (f16 KV, -ub 512, no drafter). Beyond the KV cache (8 GiB f16 at
+  # 256K, so q8_0 here), the compute buffer grows with context, ~12 GiB at 256K with -ub 512,
+  # hence -ub 256. Out of memory at 256K, 128K and 96K (96K: short by ~0.6 GiB at -ub 256);
+  # 64K loads at 23.1 GiB for the process, ~1 GiB free on the card.
+  # DRAFTER: Unsloth's DSpark block drafter (dspark-Inkling-2-Mini-Q8_0.gguf, 0.40 GB, SHA-256
+  # checked; settings from its README, n-max 3 = llama.cpp's default). It costs ~1.3 GiB with
+  # its compute buffer, i.e. roughly 32K of context. Measured: code 75 tok/s (69% drafts
+  # accepted) vs 54 without; prose 54 tok/s either way (39% accepted).
+  # Measured 2026-11-21 at this config: text, code and image input work; ~710 tok/s prefill on
+  # a 31.9K-token prompt (588 on a 704-token image prompt), 42-54 tok/s decode without drafts.
+  # It thinks by default (reasoning_content), briefly on simple prompts.
   inkling-2-mini:
     env:
       - CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
@@ -489,9 +497,17 @@ models:
       /home/jim/llama-swap/maya/free-comfyui.sh /home/jim/lab/llama-unsloth-b12588/llama-server
       -m /mnt/data/models/inkling/Inkling-2-Mini-UD-Q4_K_XL.gguf
       --mmproj /mnt/data/models/inkling/mmproj-F16.gguf
+      -md /mnt/data/models/inkling/dspark-Inkling-2-Mini-Q8_0.gguf
+      --spec-type draft-dspark
+      --spec-draft-n-max 3
+      -ngld 99
       --jinja
       -ngl 99
-      -c 32768
+      -c 65536
+      -fa on
+      -ctk q8_0
+      -ctv q8_0
+      -ub 256
       -np 1
       --temp 1.0
       --top-p 1.0
