@@ -2,7 +2,6 @@
 set -euo pipefail
 
 PROFILE=${1:-}
-NEED_GEMMA=1
 case "$PROFILE" in
 27b) WORKLOAD=Q3.8-27B-IQ4XS ;;
 dflash2) WORKLOAD=Q3.8-27B-IQ4XS-DF2 ;;
@@ -45,16 +44,6 @@ fi
 echo "Loading $WORKLOAD..."
 request "$WORKLOAD"
 
-# Every profile now keeps Gemma resident. The 27B profiles use the MSI + 5070 pair and
-# the flash workloads use the 5070 Ti + 5060 Ti + 3090 trio -- all of them EXCLUDE the
-# Zotac (af5bd53f), which is where Gemma lives, so none of them contend for its card.
-# The old rule skipped Gemma for the flash profile on the grounds that "Flash fills all
-# three cards"; that dated from when Flash still held the Zotac, before the 2026-09-12
-# change that put the Flash-Next --fit entries back to 3 GPUs. Flipped 2026-09-17.
-# Loading the WORKLOAD first is still required: its request evicts the previous
-# swap-group member and frees those cards before Gemma is requested.
-if [ "$NEED_GEMMA" = 1 ]; then
-	echo "Loading resident Gemma..."
-	request gemma-4-E4B-MTP
-fi
+# (Every profile also loaded gemma-4-E4B-MTP on the ZOTAC until 2026-11-21, when that model
+# was removed from config.yaml.)
 echo "Active profile: $PROFILE"

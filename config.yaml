@@ -330,7 +330,7 @@ models:
     env:
       - FREE_MODELS_NO_ENGINE_WAIT=1
     cmd: >-
-      /home/jim/llama-swap/strata/free-models.sh bge-m3,curator-grooming,curator-harvesting,gemma-26b-fast,gemma-4-26B-MoE-MTP,gemma-4-31B-Q4-MTP,Hemmingway,muse-glimmer-30B-dflash-vision,Swift-1.5-27B-Q6KS
+      /home/jim/llama-swap/strata/free-models.sh bge-m3,curator-grooming,curator-harvesting,gemma-4-31B-Q4-MTP,Hemmingway,Swift-1.5-27B-Q6KS
       /home/jim/llama-swap/basalt/run-basalt.sh ${PORT} /home/jim/llama-swap/basalt/basalt-q4kxl.json
       GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
     # `subagent` (the factory builder role, the librarian curator) moved here from Strata.
@@ -728,67 +728,6 @@ models:
       --port 8080
     cmdStop: docker stop swift27b
 
-    # #################### #
-    # MUSE GLIMMER MODELS #
-    # #################### #
-
-    # Muse Glimmer 30B, dynamic k-quant (~19.7 GB), plus optional DFlash drafter
-    # (~1.6 GB) and vision projector (~1.4 GB). The model card calls the speculative
-    # companion DFlash (not DSpark); both companions can run together.
-    #
-    # RUNTIME: Muse Glimmer requires llama.cpp b10353+ (the rolling server-cuda13 image).
-    # FILES live in /mnt/data/models/muse-glimmer (the mount was still /mnt/data/models, so the
-    # entry could not load, until 2026-10-06).
-    # MEASURED 2026-10-06 (b11434, 2 reps, temp 0, through llama-swap, DFlash on):
-    #   short prompt, 2K-token answer: decode 69 t/s (drafts ~77% accepted)
-    #   55K-token prompt: read 1368 t/s, decode 48.5 t/s
-    # vs Q3.8-27B-Q6KM (3090 + 5070 Ti, -sm tensor, MTP): 95 / 1100 / 63 t/s.
-    #
-    # GPU PLACEMENT: UUID pinning exposes only the two CPU-PEG Gen5 x8 cards, in
-    # 5070 Ti / MSI 5060 Ti order. The ZOTAC 5060 Ti on the x4 M.2 adapter is excluded.
-    # Equal layer split was measured with the most demanding DFlash + vision profile
-    # at ~13.5/11.3 GiB used, leaving ~2.4/4.6 GiB free including the desktop load.
-    #
-    # CONTEXT: uses one full native 131072-token slot. llama-server
-    # divides -c across -np, hence -np 1; raising -np without scaling -c would silently
-    # reduce per-request context. The plain and DFlash profiles deliberately differ
-    # only by the drafter flags, making their throughput directly comparable.
-    #
-    # The embedded chat template requires --jinja. Sampling is the model-card recipe.
-    # Reasoning is always enabled by the template; callers can set reasoning_strength
-    # (low/medium/high/xhigh) through chat_template_kwargs per request.
-    # IMPORTANT: -md only loads the draft weights in b10362; it does not enable them.
-    # Keep --spec-type draft-dflash. Depth 3 is the measured optimum for this drafter.
-  muse-glimmer-30B-dflash-vision:
-    cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL docker run --rm --name muse-glimmer-dflash-vision --runtime nvidia --cap-add SYS_ADMIN
-      -e CUDA_VISIBLE_DEVICES=GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a,GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/data/models:/models
-      --entrypoint /app/llama-server
-      ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/muse-glimmer/muse-glimmer-30B-kquant-dynamic.gguf
-      -md /models/muse-glimmer/dflash-kquant.gguf
-      -ngld 99
-      --spec-type draft-dflash
-      --spec-draft-n-max 3
-      --mmproj /models/muse-glimmer/mmproj-kquant.gguf
-      --jinja
-      -ngl 99
-      --tensor-split 1,1
-      --main-gpu 0
-      -c 131072
-      -np 1
-      -fa on
-      -b 2048
-      -ub 512
-      --temp 1.0
-      --top-p 0.95
-      --top-k 64
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop muse-glimmer-dflash-vision
-
     # ############ #
     # GEMMA MODELS #
     # ############ #
@@ -844,131 +783,6 @@ models:
       --host 0.0.0.0
       --port 8080
     cmdStop: docker stop g31mtp
-
-    # MoE + MTP (2026-06-12): ~140 -> ~184 t/s decode (+30%) — the fastest model here.
-    # gemma-4-26B-A4B MoE (qat UD-Q4_K_XL) + its separate MTP draft, both from
-    # unsloth/gemma-4-26B-A4B-it-qat-GGUF. ggml-org image (gemma MTP needs the newer
-    # build). NO --swa-full -- gemma's iSWA would OOM with it (dual KV cache). The dense
-    # gemma-4-31B-Q4-MTP above stays for higher coding quality; this is the speed pick.
-    #
-    # PLACEMENT (single GPU): pinned by UUID to the MSI 5060 Ti (57bbb375; this comment
-    # said ZOTAC until 2026-10-20). NO tensor-split / no --fit. --n-cpu-moe keeps as many MoE
-    # expert layers in VRAM as fit beside the 256K KV cache; the rest offload to
-    # RAM (64 GB host, evictable). 16 = safe "max-on-GPU w/o evicting dictation" estimate --
-    # lower toward 14-15 for more on GPU if stable; raise to 18-20 (or -ub 512->256) if it
-    # OOMs or pushes dictation.
-  gemma-4-26B-MoE-MTP:
-    cmd: |
-      docker run --rm --name g26moe --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
-      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/data/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/gemma-4/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
-      -md /models/gemma-4/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
-
-      # Google's updated canonical Gemma-4 chat template (from google/gemma-4-26B-A4B-it;
-      # byte-identical to the 31B one -- Google ships one shared template for gemma-4).
-      # Needs --jinja for its macros.
-      --jinja --chat-template-file /models/gemma-4/gemma-4-chat_template.jinja
-
-      --spec-type draft-mtp
-      --spec-draft-n-max 2
-      -ngl 99
-      --n-cpu-moe 16
-      -ngld 99
-      -c 256000
-      -np 1
-      -fa on
-      --load-mode mlock
-      -b 2048
-      -ub 512
-      -ctk q8_0
-      -ctv q8_0
-      --temp 1.0
-      --top-p 0.95
-      --top-k 64
-      --timeout 900
-      --no-context-shift
-      --ctx-checkpoints 128
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop g26moe
-
-    # gemma-26b-fast (2026-10-20): the same model and MTP draft, tuned for short prompts.
-    # -c 32768 instead of 256000 frees the KV cache, so more expert layers fit on the card
-    # and every expert layer fits on the card (--n-cpu-moe 0: 15.2 of 16.3 GB). Same card as
-    # above (GPU-57bbb375, the MSI 5060 Ti), so the two swap in the "gemma-26b" group.
-    # Measured 2026-10-20, three ~25-token prompts -> 600 tokens:
-    #   --n-cpu-moe 16, -c 256000 (the entry above): decode 38-45 t/s, prefill 57-88 t/s
-    #   --n-cpu-moe 4: 84-98 t/s | 2: 101-117 t/s | 0: 136-161 t/s decode, 150-482 t/s prefill
-    # Raise to 2 only if it OOMs (e.g. with ComfyUI loaded on the MSI card).
-  gemma-26b-fast:
-    cmd: |
-      docker run --rm --name g26fast --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
-      -e CUDA_VISIBLE_DEVICES=GPU-57bbb375-a61a-6662-e9c8-447b948f0833
-      -p ${PORT}:8080 -v /mnt/data/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/gemma-4/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
-      -md /models/gemma-4/gemma-4-26B-A4B-it-Q8_0-MTP.gguf
-      --jinja --chat-template-file /models/gemma-4/gemma-4-chat_template.jinja
-      --spec-type draft-mtp
-      --spec-draft-n-max 2
-      -ngl 99
-      --n-cpu-moe 0
-      -ngld 99
-      -c 32768
-      -np 1
-      -fa on
-      --load-mode mlock
-      -b 2048
-      -ub 512
-      -ctk q8_0
-      -ctv q8_0
-      --temp 1.0
-      --top-p 0.95
-      --top-k 64
-      --timeout 900
-      --no-context-shift
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop g26fast
-
-
-  gemma-4-E4B-MTP:
-    cmd: |
-      docker run --rm --name ge4bmtp --runtime nvidia --cap-add SYS_ADMIN --ulimit memlock=-1:-1
-      -e CUDA_VISIBLE_DEVICES=GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
-      -p ${PORT}:8080 -v /mnt/data/models:/models
-      --entrypoint /app/llama-server ghcr.io/ggml-org/llama.cpp:server-cuda13
-      -m /models/gemma-4/gemma-4-E4B-it-UD-Q4_K_XL.gguf
-      -md /models/gemma-4/mtp-gemma-4-E4B-it-BF16.gguf
-
-      # Gemma-4's canonical chat template.
-      --jinja --chat-template-file /models/gemma-4/gemma-4-chat_template.jinja
-
-      --spec-type draft-mtp
-      --spec-draft-n-max 2
-      -ngl 99
-      -ngld 99
-      # 102400 (100K), not the model's native 131072: this let Gemma sit beside
-      # the Tabby Qwen EXL3 split on the ZOTAC (entry deleted 2026-10-06). Gemma VRAM is linear
-      # in context (3453 MiB + 0.018074*tokens, measured); 100K needs ~5304 MiB
-      # of the ~5625 MiB left by Qwen. 131072 does NOT fit (-198 MiB).
-      -c 102400
-      -np 1
-      -fa auto
-      --load-mode mlock
-      -b 2048
-      -ub 512
-      -ctk q8_0
-      -ctv q8_0
-      --temp 1.0
-      --top-p 0.95
-      --top-k 64
-      --timeout 900
-      --host 0.0.0.0
-      --port 8080
-    cmdStop: docker stop ge4bmtp
 
     # ################ #
     # EMBEDDING MODELS #
@@ -1505,30 +1319,9 @@ groups:
       - Basalt-Q4KXL
       # maya-glm was here 2026-11-06 (persistent); it moved to "beside-basalt" the same day
       # so it can be unloaded.
-  "gemma-26b":
-    swap: true
-    exclusive: false
-    persistent: false
-    # Every member uses the MSI 5060 Ti (GPU-57bbb375), so loading one unloads the
-    # others. (Flint was here 2026-10-22 to 2026-10-30, then deleted.)
-    # 2026-10-26 to 2026-10-30 each member's cmd started with strata/yield-strata.sh, which
-    # unloaded Strata first: on the 62 GB machine they ran it out of RAM beside Strata (hard
-    # freeze, 2026-10-25). With 251 GB since the EPYC upgrade they run beside it.
-    members:
-      - gemma-4-26B-MoE-MTP
-      - gemma-26b-fast
-  "gemma-ondemand":
-    swap: true
-    exclusive: false
-    persistent: false
-    # gemma-4-E4B-MTP on the ZOTAC, on demand only (2026-10-01): everything now points
-    # at Strata, so Gemma is no longer resident. Until 2026-10-01 it shared the
-    # "gemma-resident" group with the voice stack (see "resident" below).
-    #   exclusive:false  -> requesting it evicts nothing; it loads beside the residents.
-    #   persistent:false -> any exclusive load (e.g. a "resident" member) unloads it.
-    # qwen-clean-2b and parakeet-asr remain unlisted on-demand fallbacks.
-    members:
-      - gemma-4-E4B-MTP
+  # "gemma-26b" (gemma-4-26B-MoE-MTP, gemma-26b-fast) and "gemma-ondemand" (gemma-4-E4B-MTP)
+  # were removed 2026-11-21 with those models (and muse-glimmer-30B-dflash-vision), to make
+  # room on /mnt/data for Hy4-flash. gemma-4-31B-Q4-MTP stays.
   # "factory-resident" (persistent, held Q3.8-27B-IQ4XS on the 3090 + 5070 Ti)
   # was REMOVED 2026-09-30: Strata is the only persistent model, and two persistent
   # models on the same cards cannot evict each other. The 27B went back into
@@ -1537,7 +1330,7 @@ groups:
   # residents (it made the factory model vanish mid-task). The "qwen35-9b" group
   # (exclusive:false) existed to stop the plain 9B doing that; it was removed with that
   # entry on 2026-10-06. Still ungrouped and carrying the same hazard:
-  # muse-glimmer-30B-dflash-vision, gemma-4-31B-Q4-MTP, gemma-4-26B-MoE-MTP and the
+  # gemma-4-31B-Q4-MTP and the
   # two curator entries. Give them a group if they start evicting residents.
   "qwen38-workload":
     swap: true

@@ -194,32 +194,6 @@
           }
         },
         {
-          "id": "muse-glimmer-30B-dflash-vision",
-          "input": [
-            "text",
-            "image"
-          ],
-          "contextWindow": 131072,
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "off": null,
-            "minimal": "low",
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh"
-          },
-          "compat": {
-            "thinkingFormat": "chat-template",
-            "chatTemplateKwargs": {
-              "reasoning_strength": {
-                "$var": "thinking.effort"
-              }
-            }
-          },
-          "maxTokens": 124518
-        },
-        {
           "id": "gemma-4-31B-Q4-MTP",
           "input": [
             "text",
@@ -231,31 +205,6 @@
             "off": null
           },
           "maxTokens": 71759
-        },
-        {
-          "id": "gemma-4-26B-MoE-MTP",
-          "input": [
-            "text",
-            "image"
-          ],
-          "contextWindow": 256000,
-          "maxTokens": 243200
-        },
-        {
-          "input": [
-            "text"
-          ],
-          "id": "gemma-26b-fast",
-          "contextWindow": 32768,
-          "maxTokens": 31129
-        },
-        {
-          "id": "gemma-4-E4B-MTP",
-          "input": [
-            "text"
-          ],
-          "contextWindow": 102400,
-          "maxTokens": 97280
         },
         {
           "input": [
