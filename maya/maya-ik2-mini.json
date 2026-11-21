@@ -30,5 +30,6 @@
   "exe": "/home/jim/lab/maya-ik2/build-vision/bin/maya-vision",
   "mmproj": "/mnt/data/models/inkling/mmproj-BF16.gguf",
   "gpu": true
- }
+ },
+ "fit_max_tokens": true
 }

@@ -80,6 +80,13 @@ if os.path.exists(over_path):
             print(f"run-maya.sh: {flag} {v} (added)", file=sys.stderr)
             args += [flag, v]
             changed = True
+# Clamp an over-long max_tokens instead of refusing it (2026-11-21, as Basalt's fit-max-tokens):
+# pi asks for the context left after its own estimate of the prompt, which runs under Maya's
+# count, so prompt + max_tokens overshot and Maya answered 400 context_length_exceeded.
+if cfg.get("fit_max_tokens") is not True:
+    print("run-maya.sh: fit_max_tokens -> true", file=sys.stderr)
+    cfg["fit_max_tokens"] = True
+    changed = True
 if changed:
     json.dump(cfg, open(path + ".tmp", "w"), indent=1)
     os.replace(path + ".tmp", path)
