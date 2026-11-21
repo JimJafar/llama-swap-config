@@ -85,9 +85,9 @@
             "image"
           ],
           "id": "inkling-2-mini",
-          "contextWindow": 65536,
+          "contextWindow": 98304,
           "reasoning": true,
-          "maxTokens": 62259
+          "maxTokens": 93388
         },
         {
           "input": [
