@@ -90,6 +90,16 @@
           "maxTokens": 62259
         },
         {
+          "input": [
+            "text",
+            "image"
+          ],
+          "id": "inkling-2-mini-256k",
+          "contextWindow": 262144,
+          "reasoning": true,
+          "maxTokens": 249036
+        },
+        {
           "id": "Hemmingway",
           "input": [
             "text"

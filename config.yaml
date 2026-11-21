@@ -517,6 +517,41 @@ models:
       --host 127.0.0.1
       --port ${PORT}
 
+  inkling-2-mini-256k:
+    # The same model on the 3090 + ZOTAC 5060 Ti, layer split, for 256K context (2026-11-21).
+    # Tensor split is not implemented for inkling2 in this build. Each card needs its own
+    # full-size compute buffer (~31 KB per context token at -ub 256), so -ub 128 here.
+    # Measured: 20.0 GiB on the 3090, 15.5 GiB on the ZOTAC (0.8 GiB free there); decode
+    # 54 tok/s code / 42 prose, ~490 tok/s prefill on a 33.8K-token prompt -- about 25-30%
+    # slower than the one-card 64K entry. Out of memory at 512K (-ub 64) and 1M (-ub 32),
+    # on the ZOTAC. 128K at -ub 256 also fits (18.0 + 14.2 GiB), ~550 tok/s prefill.
+    env:
+      - CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+    cmd: |
+      /home/jim/llama-swap/maya/free-comfyui.sh /home/jim/lab/llama-unsloth-b12588/llama-server
+      -m /mnt/data/models/inkling/Inkling-2-Mini-UD-Q4_K_XL.gguf
+      --mmproj /mnt/data/models/inkling/mmproj-F16.gguf
+      -md /mnt/data/models/inkling/dspark-Inkling-2-Mini-Q8_0.gguf
+      --spec-type draft-dspark
+      --spec-draft-n-max 3
+      -ngld 99
+      --jinja
+      -ngl 99
+      -c 262144
+      -sm layer
+      -fa on
+      -ctk q8_0
+      -ctv q8_0
+      -ub 128
+      -np 1
+      --temp 1.0
+      --top-p 1.0
+      --top-k 0
+      --min-p 0.0
+      --timeout 900
+      --host 127.0.0.1
+      --port ${PORT}
+
   # --- Altworld/Hemmingway-1 (added 2026-09-21) ---
   # A prose-writing fine-tune of Qwen3.8-27B, Apache-2.0. bartowski imatrix Q4_K_M
   # (17.44 GB / 16.24 GiB), quantized with llama.cpp b10964. Built on the same base as
@@ -563,7 +598,7 @@ models:
   # MUST stay in the `qwen38-workload` group or it will not swap.
   Hemmingway:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini,inkling-2-mini-256k /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -662,7 +697,7 @@ models:
   # first (switch-profile.sh) -- this entry cannot evict a persistent group.
   Swift-1.5-27B-Q6KS:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini,inkling-2-mini-256k /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
       # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
@@ -1614,3 +1649,4 @@ groups:
       - maya-deepseek
       # 2026-11-20: Inkling 2 Mini on the 3090.
       - inkling-2-mini
+      - inkling-2-mini-256k
