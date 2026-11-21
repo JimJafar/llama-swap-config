@@ -479,6 +479,9 @@ models:
   # Optional DSpark drafter (dspark-Inkling-2-Mini-Q8_0.gguf, --spec-type draft-dspark) not
   # used yet. On the 3090 alone, group "beside-basalt": loading it swaps out maya-glm,
   # maya-deepseek and Q3.8-27B-Q6KM and leaves Basalt loaded.
+  # Measured 2026-11-21: 19.3 GiB of 24 at 32K (f16 KV); text, code and image input work;
+  # ~1110 tok/s prefill on a 14.6K-token prompt, 51-54 tok/s decode. It thinks by default
+  # (reasoning_content), briefly on simple prompts.
   inkling-2-mini:
     env:
       - CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
