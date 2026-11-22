@@ -567,7 +567,7 @@ models:
   # MUST stay in the `qwen38-workload` group or it will not swap.
   Hemmingway:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini,inkling-2-mini-256k /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,maya-hy4,inkling-2-mini,inkling-2-mini-256k /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name hemmingway --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       -e CUDA_VISIBLE_DEVICES=GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74,GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
       -e NCCL_P2P_DISABLE=1 -e NCCL_CUMEM_ENABLE=0
@@ -666,7 +666,7 @@ models:
   # first (switch-profile.sh) -- this entry cannot evict a persistent group.
   Swift-1.5-27B-Q6KS:
     cmd: |
-      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,inkling-2-mini,inkling-2-mini-256k /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
+      /home/jim/llama-swap/strata/free-models.sh Basalt-Q4KXL,maya-glm,maya-hy4,inkling-2-mini,inkling-2-mini-256k /home/jim/llama-swap/maya/free-comfyui.sh docker run --rm --name swift27b --runtime nvidia --cap-add SYS_ADMIN
       --ipc=host
       # CUDA0 = 3090 = --main-gpu 0 (this is also the desktop card, hence the
       # larger 1024 MiB headroom in the split reasoning), CUDA1 = 5070 Ti.
@@ -1301,6 +1301,34 @@ models:
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
 
+  maya-hy4:
+    # 2026-11-22: Tencent Hy4-flash (220B, ~12B active, 512 experts, 63 GB n-gram "Engram"
+    # table read from the SSD; Tencent Hy License) as Project Maya's own Maya-L quant (IQ4_XS,
+    # 4-bit experts, 89.5 GB + the 63.4 GB table, from peasantsmith/Hy4-Flash-Maya-GGUF,
+    # SHA-256 checked: SHA256SUMS in /mnt/data/models/Hy4-Flash-Maya-L) on maya-hy4, built in
+    # the ~/lab/maya-ik2 worktree (Maya v1.1.72) for sm_86 + sm_120. The MTP draft block
+    # (7.5 GB) is in ~/lab/models/Hy4-Flash, symlinked into the model folder (/mnt/data was
+    # full). Pack: tools/hy4/pack_gguf.py (an index, no weights copied).
+    # Chosen over Basalt's NVFP4 pack (2026-11-21): on Basalt's community rig (5090 + 5060 Ti)
+    # Hy4-flash decodes ~3x slower than Qwen3.8-Flash-Next (155 vs 504 tok/s) and is not
+    # clearly more capable, so it is an extra option here, not the subagent.
+    # On the 3090 + ZOTAC beside Basalt, as maya-glm (group "beside-basalt"): 38.3 GB of VRAM,
+    # 2,747 of 20,992 routed experts in VRAM (13%), the rest on 24 CPU threads from RAM.
+    # First start measured drafting (MTP 33 vs DFly2 28 tok/s: MTP kept) and the prompt
+    # route, once (data/ in the worktree).
+    # Measured 2026-11-22 (streamed, first start, HY4_HOT still learning): code 28.4 tok/s,
+    # prose 24.6, short answers ~34; a 26K-token prompt read at 311 tok/s (84 s), 28 after it;
+    # pictures work. Thinking: high (default) or off (reasoning_effort none).
+    checkEndpoint: /v1/models
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: hy4-flash
+    env:
+      - MAYA_DIR=/home/jim/lab/maya-ik2
+    cmd: >-
+      /home/jim/llama-swap/maya/free-comfyui.sh
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/llama-swap/maya/maya-hy4-l.json --max-context 262144
+      GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a
+
 groups:
   "basalt":
     # THE DEFAULT SETUP (2026-11-04): Basalt-Q4KXL on the 5070 Ti + MSI 5060 Ti, preloaded.
@@ -1412,3 +1440,5 @@ groups:
       # 2026-11-20: Inkling 2 Mini on the 3090 (Project Maya since 2026-11-21).
       - inkling-2-mini
       - inkling-2-mini-256k
+      # 2026-11-22: Hy4-flash (Maya-L) on the 3090 + ZOTAC.
+      - maya-hy4

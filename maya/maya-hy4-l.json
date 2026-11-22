@@ -1,0 +1,38 @@
+{
+ "exe": "/home/jim/lab/maya-ik2/build/maya-hy4",
+ "args": [
+  "--pack",
+  "/mnt/data/models/Hy4-Flash-Maya-L/maya-hy4",
+  "--max-context",
+  "262144",
+  "--drafting",
+  "auto"
+ ],
+ "cwd": "/home/jim/lab/maya-ik2",
+ "tokenizer": "/mnt/data/models/Hy4-Flash-Maya-L/maya-hy4/tokenizer",
+ "model_name": "hy4-flash",
+ "gpu": [
+  2,
+  0
+ ],
+ "sampling": {
+  "temperature": 0.9,
+  "top_p": 1.0
+ },
+ "reasoning_effort": "high",
+ "lib_dirs": [
+  "/opt/cuda/lib64",
+  "/opt/cuda/targets/x86_64-linux/lib"
+ ],
+ "fit_max_tokens": true,
+ "log": "/home/jim/lab/maya-ik2/maya-hy4-l.log",
+ "installer": {
+  "family": "hy4",
+  "hy4_quant": "maya-l",
+  "layout": "standard",
+  "drafting": "on",
+  "draft_block": true,
+  "dfly2": true,
+  "model_dir": "/mnt/data/models/Hy4-Flash-Maya-L"
+ }
+}

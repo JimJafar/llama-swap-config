@@ -269,6 +269,35 @@
               }
             }
           }
+        },
+        {
+          "input": [
+            "text",
+            "image"
+          ],
+          "id": "maya-hy4",
+          "contextWindow": 262144,
+          "maxTokens": 249036,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          },
+          "compat": {
+            "thinkingFormat": "chat-template",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
         }
       ]
     }
