@@ -5,6 +5,7 @@
 # pulled): CUDA_VISIBLE_DEVICES makes it the only card the process sees, and the config's
 # "gpu": "0" is that card. Basalt is in ~/lab/basalt (built from github.com/jesdga95/basalt),
 # with its own .venv; the config's --port is overridden by llama-swap's.
+. /home/jim/llama-swap/pin-check.sh   # 2026-11-24: refuse while another model holds the pin (pin.sh)
 PORT="${1:?usage: run-basalt.sh PORT CONFIG GPU-UUID}"
 CONFIG="${2:?usage: run-basalt.sh PORT CONFIG GPU-UUID}"
 UUID="${3:?usage: run-basalt.sh PORT CONFIG GPU-UUID}"

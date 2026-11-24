@@ -23,6 +23,7 @@
 # MAYA_DIR (env) picks another Maya checkout: inkling-2-mini runs from a git worktree at
 # ~/lab/maya-ik2 (newer Maya, built by hand; see config.yaml).
 set -eu
+. /home/jim/llama-swap/pin-check.sh   # 2026-11-24: refuse while another model holds the pin (pin.sh)
 PORT="${1:?usage: run-maya.sh PORT CONFIG UUID...}"
 CONFIG="${2:?usage: run-maya.sh PORT CONFIG UUID...}"
 shift 2

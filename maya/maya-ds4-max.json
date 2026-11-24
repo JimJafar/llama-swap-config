@@ -1,0 +1,67 @@
+{
+ "exe": "/home/jim/lab/project-maya/build/maya-ds4",
+ "args": [
+  "--pack",
+  "/mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF/Maya-S/maya-ds4",
+  "--max-context",
+  "262144",
+  "--tp",
+  "4",
+  "--dspark",
+  "on",
+  "--ablate",
+  "/mnt/data/models/refusal-directions/DeepSeek-V4.1-Flash-refusal-direction.gguf",
+  "--ablate-default",
+  "off",
+  "--mmap-experts",
+  "off"
+ ],
+ "cwd": "/home/jim/lab/project-maya",
+ "tokenizer": "/mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF/Maya-S/maya-ds4/tokenizer",
+ "model_name": "deepseek-v4.1-flash",
+ "gpu": [
+  2,
+  3,
+  0,
+  1
+ ],
+ "sampling": {
+  "temperature": 1.0,
+  "top_p": 1.0
+ },
+ "reasoning_effort": "high",
+ "lib_dirs": [
+  "/opt/cuda/lib64",
+  "/opt/cuda/targets/x86_64-linux/lib"
+ ],
+ "port": 8080,
+ "env": {
+  "MAYA_DS4_TP_GGUF_UNEVEN": "1",
+  "MAYA_DS4_TP_CHECK": "1",
+  "DS4_RING_MB": "auto",
+  "DS4_COPY_GB": "150",
+  "DS4_RAM_MARGIN_GB": "12",
+  "MAYA_DS4_COPY_SWAP": "1",
+  "MAYA_DS4_HOST_FREE_TP": "1",
+  "MAYA_DS4_HC_FUSE": "2",
+  "MAYA_DS4_ROUTE_FUSE": "2",
+  "MAYA_DS4_YOCO_TP": "1",
+  "MAYA_DS4_DRAFT_COST": "1"
+ },
+ "log": "/home/jim/lab/project-maya/maya-ds4-max.log",
+ "installer": {
+  "family": "deepseek",
+  "models_dir": "/mnt/data/models",
+  "quant": "DeepSeek-V4.1-Flash-1017",
+  "ds4_quant": "maya-s",
+  "model_dir": "/mnt/data/models/DeepSeek-V4.1-Flash-1017-GGUF/Maya-S",
+  "written": "2026-11-24 09:58",
+  "ablate": "loaded"
+ },
+ "ablate": {
+  "file": "/mnt/data/models/refusal-directions/DeepSeek-V4.1-Flash-refusal-direction.gguf",
+  "model": "DeepSeek-V4.1-Flash",
+  "fitted_on": "Maya-S"
+ },
+ "fit_max_tokens": true
+}

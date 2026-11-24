@@ -6,6 +6,7 @@
 # starts: wait (up to 10 min) for ComfyUI's queue to empty, ask it to unload its models and free
 # its memory, wait for that to show, then exec the command. ComfyUI not running: start at once.
 # The other direction is ComfyUI's marvin-gpu-guard extension (~/llama-swap/comfyui).
+. /home/jim/llama-swap/pin-check.sh   # 2026-11-24: refuse while another model holds the pin (pin.sh)
 C=http://127.0.0.1:8190
 if curl -s -m 3 "$C/queue" >/dev/null 2>&1; then
     i=0

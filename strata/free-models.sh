@@ -9,8 +9,18 @@
 # exclusive group then evicts whichever of these is loaded.
 #
 # The unloads run in the background: llama-swap may hold its lock until this model is up.
+. /home/jim/llama-swap/pin-check.sh   # 2026-11-24: refuse while another model holds the pin (pin.sh)
 MODELS="${1:?usage: free-models.sh MODEL[,MODEL...] CMD [ARGS...]}"
 shift
+# 2026-11-24: `all` = every model llama-swap lists as running except $PIN_OWNER (the model
+# starting under pin.sh): maya-deepseek-max takes all four cards and the RAM.
+if [ "$MODELS" = all ]; then
+    MODELS=$(curl -s -m 5 http://127.0.0.1:8033/running | python3 -c '
+import json, os, sys
+me = os.environ.get("PIN_OWNER", "")
+print(",".join(m["model"] for m in json.load(sys.stdin).get("running", []) if m["model"] != me))')
+    [ -z "$MODELS" ] && MODELS=none
+fi
 for m in $(echo "$MODELS" | tr ',' ' '); do
     curl -s -m 120 -X POST "http://127.0.0.1:8033/api/models/unload/$m" >/dev/null 2>&1 &
 done

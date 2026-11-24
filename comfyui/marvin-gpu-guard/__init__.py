@@ -20,6 +20,7 @@ from server import PromptServer
 
 LLAMA_SWAP = "http://127.0.0.1:8033"
 CONFIG = "/home/jim/llama-swap/config.yaml"
+PIN_FILE = "/home/jim/llama-swap/pinned"
 UUIDS = ("GPU-93ab52e5", "GPU-af5bd53f")   # the 3090, the ZOTAC
 FREE_GIB = 6.0                             # wait until each card has at least this much free
 TIMEOUT_S = 120
@@ -51,6 +52,16 @@ def cards_free_gib():
 def guard(json_data):
     try:
         busy = running() & models_on_cards()
+        # 2026-11-24: a pinned model (~/llama-swap/pin.sh) keeps its cards; the job queues as is.
+        try:
+            pinned = open(PIN_FILE, encoding="utf-8").read().strip()
+        except OSError:
+            pinned = ""
+        if pinned in busy:
+            log.warning("%s is pinned (pin.sh): not unloading it; this prompt shares its cards", pinned)
+            busy.discard(pinned)
+            if not busy:
+                return json_data
         if busy:
             log.info("unloading %s from the 3090 + ZOTAC for this prompt", ", ".join(sorted(busy)))
             for m in busy:

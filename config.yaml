@@ -1290,9 +1290,10 @@ models:
     # (Maya-S) on the 3090 + ZOTAC 5060 Ti only, BESIDE Basalt-Q4KXL
     # (no free-models.sh for Basalt; group "beside-basalt", so it swaps with the other
     # models on these two cards). run-maya.sh writes the cards into the shared config at start.
-    # Measured (bench/llm_bench.py, Maya 1.1.56, Basalt idle): 25.6 tok/s short decode,
-    # 303 tok/s reading 29K (97 s to first token), 24.9 decode after it; images on. The cards
-    # hold 28 GB of experts, the CPU runs ~77% (148 GB read through the page cache).
+    # Measured (bench/llm_bench.py, Basalt idle): Maya 1.1.56 25.6 tok/s short decode,
+    # 303 tok/s reading 29K, 24.9 after it; 2026-11-16 (Maya 1.1.65, --tp 2 and the tuning in
+    # maya/maya-ds4.overrides.json) 29.2 / 1,048 / 26.3. Images on. Maya 1.1.77 since 2026-11-24.
+    # All four cards and the RAM, fastest: maya-deepseek-max below.
     checkEndpoint: /v1/models
     proxy: http://127.0.0.1:${PORT}
     useModelName: deepseek-v4.1-flash
@@ -1300,6 +1301,44 @@ models:
       /home/jim/llama-swap/maya/free-comfyui.sh
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/lab/project-maya/maya-ds4.json --max-context 262144
       GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74
+
+  maya-deepseek-max:
+    # 2026-11-24: DeepSeek-V4.1-Flash (Maya-S, same files as maya-deepseek) as fast as this PC
+    # runs it, for long DeepSeek sessions: all four cards in one tensor-parallel group of 4
+    # (3090 lead, 5070 Ti, ZOTAC, MSI; uneven GGUF split by each card's room), 136 GB of the
+    # experts copied into RAM and pinned (the rest of the 22% that fit in VRAM: ~69% of the
+    # expert work runs on the CPU lane, 24 threads), 256K context, DSpark drafting, images.
+    # Run config maya/maya-ds4-max.json (from Maya 1.1.77's maya-ds4.json; Maya's setup does
+    # not rewrite it, so recopy its paths if an update moves files).
+    # Measured 2026-11-24 (bench/llm_bench.py straight on Maya, 2 runs each after a warm-up;
+    # bench/results/llm-ds4-max-2026-11-24.jsonl). Essay decode / 29K read / decode after:
+    #   A  --tp 4, DS4_RING_MB=auto (the 11-16 best, then 45 / 1,879 / 42 on 1.1.65)  50.0-55.7 / 1,831-1,928 / 47-50
+    #   B  + experts copied to RAM (--mmap-experts off, DS4_COPY_GB=150)              50.0-54.7 / 1,835-1,922 / 47-52
+    #   C  + HOST_FREE_TP, HC_FUSE=2, ROUTE_FUSE=2                                  50.7-52.8 / 1,825-1,928 / 45-52
+    #   D  + MAYA_DS4_YOCO_TP=1 (the prompt skip for the TP group, same answers)     49.6-54.6 / 2,009-2,050 / 48-51
+    #   E  D + MAYA_DS4_CPU_LANE=smt (46 threads): decode -15-20%                    40.4-45.8 / 2,013-2,058 / 43-44
+    #   F  D + MAYA_DS4_ARENA_THP=1: no change                                       50.0-53.1 / 1,948-2,056 / 47-51
+    #   G  D + MAYA_DS4_DRAFT_COST=1 (DSpark windows by measured cost; same tokens)  52.9-54.7 / 2,001-2,051 / 49-50  <- this
+    # The RAM copy and fused launches measured level here (the page cache held the experts
+    # anyway) but are kept: the copy is pinned, so nothing can evict it during a long session.
+    # PINNED: starts under pin.sh, which writes ~/llama-swap/pinned; while that file names it,
+    # Basalt-Q4KXL / `subagent`, maya-glm and every other entry using free-models.sh,
+    # free-comfyui.sh, run-maya.sh or run-basalt.sh refuse to start (the request fails at once)
+    # instead of unloading it, and ComfyUI's guard leaves it loaded. Group "deepseek-max" is
+    # persistent, so llama-swap never evicts it. free-models.sh `all` unloads everything else
+    # first. Lift the pin with ~/llama-swap/pin.sh off (Basalt then loads on its next request).
+    # A config edit reloads llama-swap and stops it; the pin stays, so nothing takes the cards,
+    # and its next request starts it again (~90 s).
+    checkEndpoint: /v1/models
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: deepseek-v4.1-flash
+    cmd: >-
+      /home/jim/llama-swap/pin.sh on maya-deepseek-max
+      /home/jim/llama-swap/strata/free-models.sh all
+      /home/jim/llama-swap/maya/free-comfyui.sh
+      /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/llama-swap/maya/maya-ds4-max.json --max-context 262144
+      GPU-93ab52e5-8e61-197e-880a-aa6af5a13c74 GPU-d64df8cf-c877-b43d-d9a5-d6b0e38e504a
+      GPU-af5bd53f-a1ca-d807-1ae2-7f5ef261fe1a GPU-57bbb375-a61a-6662-e9c8-447b948f0833
 
   maya-hy4:
     # 2026-11-22: Tencent Hy4-flash (220B, ~12B active, 512 experts, 63 GB n-gram "Engram"
@@ -1347,6 +1386,14 @@ groups:
       - Basalt-Q4KXL
       # maya-glm was here 2026-11-06 (persistent); it moved to "beside-basalt" the same day
       # so it can be unloaded.
+  "deepseek-max":
+    # 2026-11-24: maya-deepseek-max alone, persistent so no request evicts it (its own cmd
+    # unloads the rest; pin.sh stops the rest from starting while it runs).
+    swap: false
+    exclusive: false
+    persistent: true
+    members:
+      - maya-deepseek-max
   # "gemma-26b" (gemma-4-26B-MoE-MTP, gemma-26b-fast) and "gemma-ondemand" (gemma-4-E4B-MTP)
   # were removed 2026-11-21 with those models (and muse-glimmer-30B-dflash-vision), to make
   # room on /mnt/data for Hy4-flash. gemma-4-31B-Q4-MTP stays.
