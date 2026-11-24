@@ -1,0 +1,24 @@
+#!/bin/sh
+# nvidia-smi wrapper (2026-11-24), symlinked as ~/.local/bin/nvidia-smi, which is ahead of
+# /usr/bin on llama-swap's PATH. Driver 620 prints temperatures with decimals ("56.90"), and
+# llama-swap v272 parses temperature.gpu with strconv.Atoi, so every reading became 0 and the
+# Performance tab's temperature graph sat at 0. For a --query-gpu CSV query this rounds the
+# temperature.* columns to whole degrees; every other call passes straight through.
+# Remove the symlink once llama-swap parses floats (or the driver goes back to integers).
+REAL=/usr/bin/nvidia-smi
+q=""; csv=""; prev=""
+for a in "$@"; do
+    case "$a" in
+        --query-gpu=*) q="${a#--query-gpu=}" ;;
+        --format=*csv*) csv=1 ;;
+    esac
+    [ "$prev" = --query-gpu ] && q="$a"
+    [ "$prev" = --format ] && case "$a" in *csv*) csv=1 ;; esac
+    prev="$a"
+done
+case "$q" in *temperature.*) ;; *) exec "$REAL" "$@" ;; esac
+[ -n "$csv" ] || exec "$REAL" "$@"
+cols=$(echo "$q" | tr ',' '\n' | awk '/^ *temperature\./ {printf "%s%d", s, NR; s=","}')
+"$REAL" "$@" | awk -v cols="$cols" 'BEGIN { FS = OFS = ", "; n = split(cols, c, ",") }
+    { for (i = 1; i <= n; i++) if ($c[i] ~ /^[0-9]+\.[0-9]+( C)?$/) { u = ($c[i] ~ / C$/) ? " C" : ""; $c[i] = sprintf("%d%s", $c[i] + 0.5, u) } print; fflush() }'
+exit 0
