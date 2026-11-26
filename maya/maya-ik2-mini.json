@@ -1,18 +1,20 @@
 {
- "exe": "/home/jim/lab/maya-ik2/build/maya-ik2",
+ "exe": "/home/jim/lab/project-maya/build/maya-ik2",
  "args": [
   "--model",
   "/mnt/data/models/inkling/Inkling-2-Mini-UD-Q4_K_XL.gguf",
   "--max-context",
   "196608",
   "--draft",
-  "/mnt/data/models/inkling/mtp.safetensors"
+  "/mnt/data/models/inkling/dspark-Inkling-2-Mini-Q8_0.gguf",
+  "--drafting",
+  "auto"
  ],
  "env": {
   "IK2_KV": "fp8"
  },
- "cwd": "/home/jim/lab/maya-ik2",
- "tokenizer": "/mnt/data/models/inkling/maya/ik2/tokenizer",
+ "cwd": "/home/jim/lab/project-maya",
+ "tokenizer": "/mnt/data/models/inkling/maya-ik2/tokenizer",
  "model_name": "inkling-2-mini",
  "gpu": [
   2
@@ -27,7 +29,7 @@
   "/opt/cuda/targets/x86_64-linux/lib"
  ],
  "vision": {
-  "exe": "/home/jim/lab/maya-ik2/build-vision/bin/maya-vision",
+  "exe": "/home/jim/lab/project-maya/build-vision/bin/maya-vision",
   "mmproj": "/mnt/data/models/inkling/mmproj-BF16.gguf",
   "gpu": true
  },

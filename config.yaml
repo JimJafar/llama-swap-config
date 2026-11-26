@@ -469,41 +469,45 @@ models:
   # 26.2B MoE (3.4B active, 5.4B effective: layers 6-17 run three times per token, a "looped"
   # transformer), text + image in, 1M native context. unsloth UD-Q4_K_XL (17.63 GB; NVFP4
   # experts in layers 0-19, Q8_0 elsewhere) + mmproj-BF16 (pictures) + Thinking Machines'
-  # official DSpark drafter mtp.safetensors, all in /mnt/data/models/inkling, SHA-256 checked
+  # official DSpark drafter (mtp.safetensors, and since 2026-11-25 its GGUF), all in
+  # /mnt/data/models/inkling, SHA-256 checked
   # (SHA256SUMS there).
-  # ENGINE (2026-11-21): Project Maya's maya-ik2 (v1.1.72, "experimental preview": one NVIDIA
-  # card of 24 GB, sm_80+), from a git worktree of ~/lab/project-maya at ~/lab/maya-ik2 so the
-  # maya-glm/maya-deepseek install (v1.1.65) is untouched. Built by hand there: build/ (cmake
-  # -DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86, target maya-ik2) and build-vision/
-  # (maya-vision from a reflink copy of project-maya's llama.cpp with tools/vision's patches).
-  # Tokenizer: tools/strata_tokenizer.py -> /mnt/data/models/inkling/maya/ik2. run-maya.sh
-  # with MAYA_DIR picks the worktree; the run configs are maya/maya-ik2-mini*.json here.
-  # Every expert stays in VRAM (FP8 KV cache) and a token runs as one CUDA graph. Same file,
-  # same harness (streamed, 3090), against llama.cpp (Unsloth b12588, f16 KV, 96K, DSpark):
-  #   llama.cpp:            code 76 tok/s, prose 54, 33K prompt 1040 tok/s, 52 after it
-  #   inkling-2-mini (Maya, 192K + drafter): code 145-168, prose 117-129, story 115-145
-  #   inkling-2-mini-256k (Maya, no drafter): ~122 everywhere, at temperature 0 and 1
-  #   Through llama-swap: 192K entry code 166, prose 129, 33K prompt 2024 tok/s, 113 after it;
-  #   256K entry 124 / 123 / 2023 / 110. 23.6 / 22.8 GB on the card. Pictures work on both.
-  # THE DRAFTER'S CATCH: it keeps its full-attention layer's whole context in FP16. Above
-  # 192K the engine shrinks that (and IK2_DRAFT_CTX caps it), and a shrunk drafter context ran
-  # at ~80 tok/s through the server, slower than no drafter; at 288K+ it also pushes experts
-  # out of VRAM (the "cache path", ~50 tok/s). Hence 192K with it, 256K without.
-  # Pictures: maya-vision starts per request, on the 3090 if 1.9 GB is free, else on the CPU
-  # (it is the CPU here: the card is full); a 640px picture took ~3 s.
+  # ENGINE: Project Maya's maya-ik2, since 2026-11-25 from the main checkout ~/lab/project-maya
+  # (v1.1.81, where Inkling is a supported model; 2026-11-21..25 a hand-built v1.1.72 worktree
+  # at ~/lab/maya-ik2, which maya-hy4 still uses). Set up by Maya itself:
+  #   ./maya.sh --setup --model inkling-2-mini --model-dir /mnt/data/models/inkling --gpu 2
+  #     --context 262144 --no-start --yes --plain   (writes maya-inkling-2-mini.json there)
+  # The run configs are maya/maya-ik2-mini*.json here (run-maya.sh). Tokenizer:
+  # /mnt/data/models/inkling/maya-ik2/tokenizer. Drafter: the GGUF form,
+  # dspark-Inkling-2-Mini-Q8_0.gguf (0.4 GB, peasantsmith/Inkling-2-Mini-Maya-GGUF, SHA-256 in
+  # SHA256SUMS), with --drafting auto: the first start at a context measures no drafting /
+  # prompt lookup / drafter once and keeps the fastest (data/ik2-drafting.txt in the checkout).
+  # Every expert stays in VRAM (FP8 KV cache) and a token runs as one CUDA graph.
+  # Measured 2026-11-25 (bench/ink_bench.py, streamed, thinking off, Basalt on its own cards;
+  # bench/results/ink-maya-1.1.81-2026-11-25.jsonl), code / prose / story tok/s, 32K-token
+  # read, decode after it:
+  #   inkling-2-mini (192K + drafter):  code 189-207, prose 117-119, story 116-117,
+  #                                     32K read at 2,056 tok/s (15.7 s), 124 after it
+  #   inkling-2-mini-256k (no drafting): ~120 flat, 32K read at 2,051 tok/s, 109 after it
+  #   (v1.1.72 was: drafter entry code 166, prose 129, 2,024 / 113; 256K entry 124 / 123 /
+  #   2,023 / 110). So 1.1.81's drafter is ~25% faster on code but no help on prose here.
+  # THE 192K LIMIT: v1.1.81 says the drafter fits beside 262K on a 24 GB card, but on the
+  # 3090 at 262K the engine leaves it out (NOTE: its 1.14 GiB room does not fit; 22.6 GiB
+  # free, ComfyUI's idle CUDA context keeps 426 MiB there), and auto keeps plain decoding.
+  # At 192K it loads (1.39 GiB with the lookup). Hence 192K with it, 256K without, as before.
+  # Pictures: maya-vision starts per request, on the 3090 if there is room, else on the CPU.
   # Sampling: card defaults in the run config (temperature 1.0, top_p 1.0), thinking "high"
-  # by default (reasoning_effort none/low/medium/high/max per request). One request at a time.
+  # by default (reasoning_effort none/low/medium/high/max per request); no thinking budget
+  # (1.1.80's default). One request at a time.
   # On the 3090 alone, group "beside-basalt": loading it swaps out maya-glm, maya-deepseek and
   # Q3.8-27B-Q6KM and leaves Basalt loaded.
   # llama.cpp history: tested Unsloth's b12588 (looped layers + DSpark) and upstream b12608;
   # flash attention is ignored for Inkling's relative position bias (#32740 open), so f16 KV
-  # was needed and 96K was the one-card limit. Removed 2026-11-21 in favour of Maya.
+  # was needed and 96K was the one-card limit (code 76, prose 54 tok/s). Removed 2026-11-21.
   inkling-2-mini:
     checkEndpoint: /v1/models
     proxy: http://127.0.0.1:${PORT}
     useModelName: inkling-2-mini
-    env:
-      - MAYA_DIR=/home/jim/lab/maya-ik2
     cmd: >-
       /home/jim/llama-swap/maya/free-comfyui.sh
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/llama-swap/maya/maya-ik2-mini.json --max-context 196608
@@ -514,8 +518,6 @@ models:
     checkEndpoint: /v1/models
     proxy: http://127.0.0.1:${PORT}
     useModelName: inkling-2-mini
-    env:
-      - MAYA_DIR=/home/jim/lab/maya-ik2
     cmd: >-
       /home/jim/llama-swap/maya/free-comfyui.sh
       /home/jim/llama-swap/maya/run-maya.sh ${PORT} /home/jim/llama-swap/maya/maya-ik2-mini-256k.json --max-context 262144
@@ -1292,7 +1294,8 @@ models:
     # models on these two cards). run-maya.sh writes the cards into the shared config at start.
     # Measured (bench/llm_bench.py, Basalt idle): Maya 1.1.56 25.6 tok/s short decode,
     # 303 tok/s reading 29K, 24.9 after it; 2026-11-16 (Maya 1.1.65, --tp 2 and the tuning in
-    # maya/maya-ds4.overrides.json) 29.2 / 1,048 / 26.3. Images on. Maya 1.1.77 since 2026-11-24.
+    # maya/maya-ds4.overrides.json) 29.2 / 1,048 / 26.3. Images on. Maya 1.1.77 since 2026-11-24, 1.1.81 since
+    # 2026-11-25 (its setup's speed calibration turned DSpark off: 24.3 vs 29.5 tok/s without).
     # All four cards and the RAM, fastest: maya-deepseek-max below.
     checkEndpoint: /v1/models
     proxy: http://127.0.0.1:${PORT}
